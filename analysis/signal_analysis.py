@@ -1,68 +1,51 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import butter, filtfilt, spectrogram
-import os
+from scipy.signal import butter, sosfilt, stft
 
-# === 1. Load your PCM file ===
-filename = "test2.pcm"  # update with your actual file name
-fs = 44100  # sample rate used in the Android app
-dtype = np.int16  # 16-bit PCM
+# ----- CONFIG -----
+samplerate = 44100
+filename = "test2.pcm"   # change to your PCM file name
 
-# Load the raw PCM data
-data = np.fromfile(filename, dtype=dtype)
+# ----- 1. LOAD PCM -----
+data = np.fromfile(filename, dtype=np.int16).astype(np.float32) / 32768.0
 
-# === 2. Plot Time Domain Signal ===
-plt.figure()
-plt.plot(np.arange(len(data)) / fs, data)
-plt.title("Time Domain Signal")
-plt.xlabel("Time [s]")
+# ----- 2. FFT -----
+fft_data = np.fft.rfft(data)
+freqs = np.fft.rfftfreq(len(data), 1 / samplerate)
+
+# Plot FFT
+plt.figure(figsize=(10,4))
+plt.plot(freqs, np.abs(fft_data))
+plt.title("FFT (Frequency Domain)")
+plt.xlabel("Frequency (Hz)")
+plt.ylabel("Magnitude")
+plt.xlim(0, 22000)
+plt.grid()
+plt.show()
+
+# ----- 3. BAND-PASS FILTER (18–20 kHz chirp band) -----
+low = 18000
+high = 20000
+sos = butter(10, [low, high], btype='bandpass', fs=samplerate, output='sos')
+filtered = sosfilt(sos, data)
+
+# ----- 4. Filtered Time-domain signal -----
+plt.figure(figsize=(10,4))
+plt.plot(filtered[:2000])
+plt.title("Filtered Signal (Time Domain)")
+plt.xlabel("Sample")
 plt.ylabel("Amplitude")
 plt.grid()
-plt.savefig("time_domain.png")
-plt.close()
+plt.show()
 
-# === 3. Perform FFT ===
-fft_data = np.fft.fft(data)
-freqs = np.fft.fftfreq(len(fft_data), 1/fs)
+# ----- 5. STFT / SPECTROGRAM -----
+f, t, Zxx = stft(filtered, fs=samplerate, nperseg=1024)
 
-half = len(freqs) // 2
-plt.figure()
-plt.plot(freqs[:half], np.abs(fft_data[:half]))
-plt.title("Frequency Domain (FFT)")
-plt.xlabel("Frequency [Hz]")
-plt.ylabel("Amplitude")
-plt.grid()
-plt.savefig("fft_signal.png")
-plt.close()
-
-# === 4. Apply Band-Pass Filter (BPF) ===
-lowcut, highcut = 18000, 20000  # ultrasonic range
-b, a = butter(4, [lowcut / (fs / 2), highcut / (fs / 2)], btype="band")
-filtered = filtfilt(b, a, data)
-
-# === 5. Inverse FFT (IFFT) after filtering ===
-ifft_data = np.fft.ifft(np.fft.fft(filtered)).real
-
-plt.figure()
-plt.plot(np.arange(len(ifft_data)) / fs, ifft_data)
-plt.title("Filtered Signal (After BPF + IFFT)")
-plt.xlabel("Time [s]")
-plt.ylabel("Amplitude")
-plt.grid()
-plt.savefig("filtered_signal.png")
-plt.close()
-
-# === 6. Spectrogram (STFT) ===
-f, t, Sxx = spectrogram(filtered, fs, nperseg=1024)
-plt.figure()
-plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='gouraud')
-plt.title("Spectrogram (STFT)")
-plt.ylabel("Frequency [Hz]")
-plt.xlabel("Time [s]")
-plt.colorbar(label='Power [dB]')
-plt.ylim(0, 25000)
-plt.savefig("spectrogram.png")
-plt.close()
-
-print("✅ All graphs saved successfully!")
-print(f"Saved files in: {os.getcwd()}")
+plt.figure(figsize=(10,6))
+plt.pcolormesh(t, f, np.abs(Zxx), shading='gouraud')
+plt.title("Spectrogram (Filtered 18kHz–20kHz Band)")
+plt.xlabel("Time (s)")
+plt.ylabel("Frequency (Hz)")
+plt.ylim(15000, 22000)
+plt.colorbar(label='Intensity')
+plt.show()
