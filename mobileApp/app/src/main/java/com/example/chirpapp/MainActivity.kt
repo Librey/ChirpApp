@@ -19,7 +19,6 @@ import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.PI
@@ -33,7 +32,6 @@ class MainActivity : ComponentActivity() {
     private val chirpStartHz = 18000.0
     private val chirpEndHz = 20000.0
     private val chirpDurationSeconds = 2
-    private val sessionDurationSeconds = 10
 
     private val status = mutableStateOf("Request Permission")
     private var job: Job? = null
@@ -98,8 +96,13 @@ class MainActivity : ComponentActivity() {
 
     private fun startChirpAndRecord() {
         if (job?.isActive == true) return
-        job = lifecycleScope.launch(Dispatchers.Default) {
-            val recordedAudio = ByteArrayOutputStream()
+        job = lifecycleScope.launch(Dispatchers.IO) {
+            // Prepare file for continuous recording
+            val fileName = "chirp_record_${System.currentTimeMillis()}.pcm"
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val file = File(downloadsDir, fileName)
+            val fileOutputStream = FileOutputStream(file)
+
             val chirpSamples = generateChirpSamples()
 
             val recorder = AudioRecord(
@@ -135,25 +138,52 @@ class MainActivity : ComponentActivity() {
             recorder.startRecording()
             track.play()
 
-            launch {
+            // Fix race condition: capture job to cancel it before releasing track
+            val writerJob = launch {
                 while (isActive) {
                     track.write(chirpSamples, 0, chirpSamples.size)
                 }
             }
 
-            val buffer = ByteArray(2048)
-            val sessionEnd = System.currentTimeMillis() + (sessionDurationSeconds * 1000)
-            while (System.currentTimeMillis() < sessionEnd && isActive) {
-                val read = recorder.read(buffer, 0, buffer.size)
-                if (read > 0) recordedAudio.write(buffer, 0, read)
+            try {
+                val buffer = ByteArray(2048)
+                // Continue recording until the coroutine is cancelled (user presses Stop)
+                while (isActive) {
+                    val read = recorder.read(buffer, 0, buffer.size)
+                    if (read > 0) {
+                        fileOutputStream.write(buffer, 0, read)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ChirpApp", "Error during recording", e)
+            } finally {
+                withContext(NonCancellable) {
+                    writerJob.cancelAndJoin()
+                    
+                    try {
+                        recorder.stop()
+                    } catch (e: IllegalStateException) {
+                        e.printStackTrace()
+                    }
+                    recorder.release()
+                    
+                    try {
+                        track.stop()
+                    } catch (e: IllegalStateException) {
+                        e.printStackTrace()
+                    }
+                    track.release()
+
+                    // Close the file stream
+                    try {
+                        fileOutputStream.flush()
+                        fileOutputStream.close()
+                        Log.i("ChirpApp", "✅ PCM file saved to ${file.absolutePath}")
+                    } catch (e: Exception) {
+                        Log.e("ChirpApp", "Error saving file", e)
+                    }
+                }
             }
-
-            recorder.stop()
-            recorder.release()
-            track.stop()
-            track.release()
-
-            saveAsPcm(recordedAudio.toByteArray())
         }
     }
 
@@ -180,18 +210,5 @@ class MainActivity : ComponentActivity() {
                 this[i * 2 + 1] = ((s shr 8) and 0xFF).toByte()
             }
         }
-    }
-
-    // 🔽 Updated Function: Save raw PCM data instead of WAV
-    private fun saveAsPcm(data: ByteArray) {
-        val fileName = "chirp_reflection_${System.currentTimeMillis()}.pcm"
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val file = File(downloadsDir, fileName)
-
-        FileOutputStream(file).use { out ->
-            out.write(data)
-        }
-
-        Log.i("ChirpApp", "✅ PCM file saved to ${file.absolutePath} (${data.size} bytes)")
     }
 }
