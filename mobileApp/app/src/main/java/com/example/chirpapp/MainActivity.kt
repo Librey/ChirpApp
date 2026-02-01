@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,21 +32,27 @@ class MainActivity : ComponentActivity() {
     private val sampleRate = 44100
     private val chirpStartHz = 18000.0
     private val chirpEndHz = 20000.0
-    private val chirpDurationSeconds = 2
 
     private val status = mutableStateOf("Request Permission")
     private var job: Job? = null
     private var recordingStartTime = 0L
 
     // Recording settings
-    private val labelState = mutableStateOf(TextFieldValue("eating"))
+    private val labelState = mutableStateOf(TextFieldValue("chips"))
     private val distanceState = mutableStateOf(TextFieldValue("30"))
     private val angleState = mutableStateOf(TextFieldValue("120"))
+
+    // NEW: Setting selection (1 or 2)
+    private val selectedSetting = mutableStateOf(2)  // Default: Setting 2
+
+    // NEW: Serving counter
+    private val servingCounter = mutableStateOf(1)
+    private var lastLabel = "chips"  // Track label changes
 
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
             if (isGranted) {
-                status.value = "Start Chirping"
+                status.value = "Start Recording"
                 Toast.makeText(this, "Permission granted", Toast.LENGTH_SHORT).show()
             } else {
                 status.value = "Permission Denied"
@@ -71,7 +78,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        if (hasRecordPermission()) status.value = "Start Chirping"
+        if (hasRecordPermission()) status.value = "Start Recording"
     }
 
     @Composable
@@ -80,6 +87,8 @@ class MainActivity : ComponentActivity() {
         val label = remember { labelState }
         val distance = remember { distanceState }
         val angle = remember { angleState }
+        val setting = remember { selectedSetting }
+        val serving = remember { servingCounter }
 
         Column(
             modifier = Modifier
@@ -89,20 +98,102 @@ class MainActivity : ComponentActivity() {
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "ChirpApp Settings",
+                text = "ChirpApp - Pilot Study",
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.padding(bottom = 24.dp)
             )
 
+            // NEW: Setting Selection
+            Text(
+                text = "Chirp Setting:",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp)
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = (setting.value == 1),
+                            onClick = {
+                                if (currentStatus.value == "Start Recording") {
+                                    setting.value = 1
+                                }
+                            }
+                        )
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = (setting.value == 1),
+                        onClick = {
+                            if (currentStatus.value == "Start Recording") {
+                                setting.value = 1
+                            }
+                        },
+                        enabled = currentStatus.value == "Start Recording"
+                    )
+                    Text(
+                        text = "Setting 1 (500ms chirp, 250ms gap)",
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = (setting.value == 2),
+                            onClick = {
+                                if (currentStatus.value == "Start Recording") {
+                                    setting.value = 2
+                                }
+                            }
+                        )
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = (setting.value == 2),
+                        onClick = {
+                            if (currentStatus.value == "Start Recording") {
+                                setting.value = 2
+                            }
+                        },
+                        enabled = currentStatus.value == "Start Recording"
+                    )
+                    Text(
+                        text = "Setting 2 (1000ms chirp, 500ms gap)",
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+            }
+
+            Divider(modifier = Modifier.padding(vertical = 16.dp))
+
             // Label input
             OutlinedTextField(
                 value = label.value,
-                onValueChange = { label.value = it },
-                label = { Text("Label (e.g., eating, idle, drinking)") },
+                onValueChange = {
+                    label.value = it
+                    // Reset counter if label changed
+                    if (it.text.trim() != lastLabel) {
+                        serving.value = 1
+                        lastLabel = it.text.trim()
+                    }
+                },
+                label = { Text("Food Label (e.g., chips, carrots)") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 12.dp),
-                enabled = currentStatus.value == "Start Chirping"
+                enabled = currentStatus.value == "Start Recording"
             )
 
             // Distance input
@@ -113,7 +204,7 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 12.dp),
-                enabled = currentStatus.value == "Start Chirping"
+                enabled = currentStatus.value == "Start Recording"
             )
 
             // Angle input
@@ -123,30 +214,48 @@ class MainActivity : ComponentActivity() {
                 label = { Text("Angle (degrees)") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 24.dp),
-                enabled = currentStatus.value == "Start Chirping"
+                    .padding(bottom = 16.dp),
+                enabled = currentStatus.value == "Start Recording"
             )
+
+            // NEW: Serving Counter Display
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Text(
+                    text = "Current Serving: #${String.format("%02d", serving.value)}",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
 
             // Main button
             Button(
                 onClick = {
                     when (currentStatus.value) {
-                        "Start Chirping" -> {
+                        "Start Recording" -> {
                             // Validate inputs
                             if (label.value.text.isBlank()) {
                                 Toast.makeText(
                                     this@MainActivity,
-                                    "Please enter a label",
+                                    "Please enter a food label",
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 return@Button
                             }
                             startChirpAndRecord()
-                            currentStatus.value = "Stop Chirping"
+                            currentStatus.value = "Stop Recording"
                         }
-                        "Stop Chirping" -> {
+                        "Stop Recording" -> {
                             stopChirpAndRecord()
-                            currentStatus.value = "Start Chirping"
+                            // Auto-increment serving counter
+                            serving.value += 1
+                            currentStatus.value = "Start Recording"
                         }
                         else -> {
                             requestMicrophonePermission()
@@ -163,11 +272,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            // Info text
-            if (currentStatus.value == "Stop Chirping") {
+            // Status text
+            if (currentStatus.value == "Stop Recording") {
                 Text(
-                    text = "Recording in progress...",
-                    style = MaterialTheme.typography.bodySmall,
+                    text = "Recording serving #${String.format("%02d", serving.value)}...",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = 16.dp)
                 )
@@ -193,16 +302,19 @@ class MainActivity : ComponentActivity() {
             val label = labelState.value.text.trim()
             val distance = distanceState.value.text.trim()
             val angle = angleState.value.text.trim()
+            val setting = selectedSetting.value
+            val serving = String.format("%02d", servingCounter.value)
             val timestamp = System.currentTimeMillis()
 
-            // Generate filename with settings
-            val fileName = "chirp_${label}_${distance}cm_${angle}deg_$timestamp.pcm"
+            // NEW: Filename with serving number
+            val fileName = "chirp_${label}_${distance}cm_${angle}deg_s${serving}_set${setting}_$timestamp.pcm"
 
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             val file = File(downloadsDir, fileName)
             val fileOutputStream = FileOutputStream(file)
 
-            val chirpSamples = generateChirpSamples()
+            // NEW: Generate chirps based on selected setting
+            val chirpSamples = generateChirpSamplesWithGaps(setting)
 
             val recorder = AudioRecord(
                 MediaRecorder.AudioSource.MIC,
@@ -275,18 +387,16 @@ class MainActivity : ComponentActivity() {
                         fileOutputStream.flush()
                         fileOutputStream.close()
 
-                        // Calculate actual recording duration
                         val durationSeconds = (System.currentTimeMillis() - recordingStartTime) / 1000
 
-                        Log.i("ChirpApp", "✅ PCM file saved to ${file.absolutePath}")
-                        Log.i("ChirpApp", "Recording duration: ${durationSeconds}s")
+                        Log.i("ChirpApp", "✅ Saved: $fileName")
+                        Log.i("ChirpApp", "Duration: ${durationSeconds}s, Serving: $serving, Setting: $setting")
 
-                        // Show success message
                         withContext(Dispatchers.Main) {
                             Toast.makeText(
                                 this@MainActivity,
-                                "Saved: $fileName (${durationSeconds}s)",
-                                Toast.LENGTH_LONG
+                                "Saved serving #$serving (${durationSeconds}s)",
+                                Toast.LENGTH_SHORT
                             ).show()
                         }
                     } catch (e: Exception) {
@@ -301,21 +411,37 @@ class MainActivity : ComponentActivity() {
         job?.cancel()
     }
 
-    private fun generateChirpSamples(): ByteArray {
-        val totalSamples = chirpDurationSeconds * sampleRate
-        val chirpShorts = ShortArray(totalSamples)
-
-        for (i in 0 until totalSamples) {
-            val t = i.toDouble() / sampleRate
-            val freq = chirpStartHz + (chirpEndHz - chirpStartHz) * (t / chirpDurationSeconds)
-            val amplitude = (sin(2 * PI * freq * t) * 32767.0).toInt()
-                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-            chirpShorts[i] = amplitude.toShort()
+    // NEW: Generate chirps with gaps based on setting
+    private fun generateChirpSamplesWithGaps(setting: Int): ByteArray {
+        // Setting parameters
+        val (chirpDurationMs, gapDurationMs) = when (setting) {
+            1 -> Pair(500, 250)   // Setting 1: 500ms chirp, 250ms gap
+            2 -> Pair(1000, 500)  // Setting 2: 1000ms chirp, 500ms gap
+            else -> Pair(1000, 500)
         }
 
-        return ByteArray(chirpShorts.size * 2).apply {
-            for (i in chirpShorts.indices) {
-                val s = chirpShorts[i].toInt()
+        val chirpDurationSamples = (chirpDurationMs * sampleRate) / 1000
+        val gapDurationSamples = (gapDurationMs * sampleRate) / 1000
+        val cycleSamples = chirpDurationSamples + gapDurationSamples
+
+        // Generate one chirp + gap cycle
+        val cycleShorts = ShortArray(cycleSamples)
+
+        // Generate chirp part (first chirpDurationSamples)
+        for (i in 0 until chirpDurationSamples) {
+            val t = i.toDouble() / sampleRate
+            val freq = chirpStartHz + (chirpEndHz - chirpStartHz) * (t / (chirpDurationMs / 1000.0))
+            val amplitude = (sin(2 * PI * freq * t) * 32767.0).toInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+            cycleShorts[i] = amplitude.toShort()
+        }
+
+        // Gap part is already 0 (silence) from ShortArray initialization
+
+        // Convert to ByteArray
+        return ByteArray(cycleShorts.size * 2).apply {
+            for (i in cycleShorts.indices) {
+                val s = cycleShorts[i].toInt()
                 this[i * 2] = (s and 0xFF).toByte()
                 this[i * 2 + 1] = ((s shr 8) and 0xFF).toByte()
             }
