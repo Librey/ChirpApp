@@ -1,0 +1,14 @@
+{
+  "baseName": "chirp_coke/lemonade_30cm_120deg_c30_s01_set2_1771276581657",
+  "mainPcm": "chirp_coke/lemonade_30cm_120deg_c30_s01_set2_1771276581657.pcm",
+  "idleTailPcm": "chirp_coke/lemonade_30cm_120deg_c30_s01_set2_1771276581657_idleTail.pcm",
+  "sampleRate": 44100,
+  "channels": 2,
+  "bitsPerSample": 16,
+  "chirpSetting": 2,
+  "durationSecFixed": 30,
+  "startUnixMs": 1771276581657,
+  "endUnixMs": 1771276612371,
+  "stopEatingUnixMs": -1,
+  "note": "idleTailPcm contains audio after stopEatingUnixMs (if marked)."
+}

@@ -1,0 +1,14 @@
+{
+  "baseName": "chirp_crackers_30cm_120deg_c30_s01_set2_1771275831879",
+  "mainPcm": "chirp_crackers_30cm_120deg_c30_s01_set2_1771275831879.pcm",
+  "idleTailPcm": "chirp_crackers_30cm_120deg_c30_s01_set2_1771275831879_idleTail.pcm",
+  "sampleRate": 44100,
+  "channels": 2,
+  "bitsPerSample": 16,
+  "chirpSetting": 2,
+  "durationSecFixed": 30,
+  "startUnixMs": 1771275831879,
+  "endUnixMs": 1771275862750,
+  "stopEatingUnixMs": -1,
+  "note": "idleTailPcm contains audio after stopEatingUnixMs (if marked)."
+}

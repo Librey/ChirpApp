@@ -8,7 +8,7 @@ from pathlib import Path
 samplerate = 44100
 
 script_dir = Path(__file__).parent
-raw_data_folder = script_dir / "raw_data"
+raw_data_folder = script_dir / "0232_setting"
 analyzed_data_folder = script_dir / "analyzed_data"
 
 os.makedirs(raw_data_folder, exist_ok=True)

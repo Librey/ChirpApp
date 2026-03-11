@@ -1,0 +1,14 @@
+{
+  "baseName": "chirp_water_30cm_120deg_c30_s03_set2_1771276312374",
+  "mainPcm": "chirp_water_30cm_120deg_c30_s03_set2_1771276312374.pcm",
+  "idleTailPcm": "chirp_water_30cm_120deg_c30_s03_set2_1771276312374_idleTail.pcm",
+  "sampleRate": 44100,
+  "channels": 2,
+  "bitsPerSample": 16,
+  "chirpSetting": 2,
+  "durationSecFixed": 30,
+  "startUnixMs": 1771276312374,
+  "endUnixMs": 1771276343140,
+  "stopEatingUnixMs": -1,
+  "note": "idleTailPcm contains audio after stopEatingUnixMs (if marked)."
+}
