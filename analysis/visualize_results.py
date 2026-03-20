@@ -366,7 +366,7 @@ def plot_example_spectrograms():
         axes[0, col].set_title(f'{label} — Time Domain\n({fname})', fontsize=12, fontweight='bold')
         axes[0, col].set_xlabel('Time (s)')
         axes[0, col].set_ylabel('Amplitude')
-        axes[0, col].set_ylim(-0.01, 0.01)
+        axes[0, col].set_ylim(-0.10, 0.10)
         axes[0, col].grid(alpha=0.3)
 
         # STFT spectrogram

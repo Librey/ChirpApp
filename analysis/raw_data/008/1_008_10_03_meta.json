@@ -1,0 +1,14 @@
+{
+  "baseName": "1_008_10_03",
+  "mainPcm": "1_008_10_03.pcm",
+  "idleTailPcm": "1_008_10_03_idleTail.pcm",
+  "sampleRate": 44100,
+  "channels": 2,
+  "bitsPerSample": 16,
+  "chirpSetting": 2,
+  "durationSecFixed": 30,
+  "startUnixMs": 1771531827600,
+  "endUnixMs": 1771531859149,
+  "stopEatingUnixMs": -1,
+  "note": "idleTailPcm contains audio after stopEatingUnixMs (if marked)."
+}

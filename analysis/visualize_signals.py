@@ -61,7 +61,7 @@ def find_files():
         if not f.stem.endswith("_idleTail"):
             eating_file = f
             break
-    for f in sorted((raw / "Idle").glob("*.pcm")):
+    for f in sorted((raw / "idle-gp").glob("*.pcm")):
         if not f.stem.endswith("_idleTail"):
             idle_file = f
             break
