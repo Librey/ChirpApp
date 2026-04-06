@@ -1,225 +1,194 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.signal import stft, find_peaks
 import os
+import re
+import warnings
 from pathlib import Path
 
-# ----- CONFIG -----
-samplerate = 44100
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import spectrogram as scipy_spectrogram
 
-script_dir = Path(__file__).parent
-raw_data_folder = script_dir / "0232_setting"
-analyzed_data_folder = script_dir / "analyzed_data"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+warnings.filterwarnings("ignore")
 
-os.makedirs(raw_data_folder, exist_ok=True)
-os.makedirs(analyzed_data_folder, exist_ok=True)
+# ───────────────── CONFIG ─────────────────
+SAMPLE_RATE = 44100
+CHIRP_DUR_MS = 1000
+GAP_DUR_MS = 500
+SOUND_SPEED = 343.0
 
-# ----- INTERFERENCE CHANNEL ESTIMATION -----
-def estimate_interference_channel(baseline_files, samplerate):
-    """
-    Estimate interference channel from baseline recordings.
-    Returns averaged baseline spectrum in log domain (dB).
-    """
-    print("\n" + "="*60)
-    print("ESTIMATING INTERFERENCE CHANNEL FROM BASELINES")
-    print("="*60)
-    
-    baseline_spectra = []
-    min_time_bins = float('inf')
-    
-    for baseline_file in baseline_files:
-        try:
-            # Load stereo baseline
-            data_raw = np.fromfile(baseline_file, dtype=np.int16)
-            data_stereo = data_raw.reshape(-1, 2)
-            data = data_stereo[:, 0].astype(np.float32) / 32768.0
-            
-            # Discard direct path
-            reflection_samples = int((0.30 / 343) * samplerate)
-            data = data[reflection_samples:]
-            
-            # Simple segmentation
-            abs_data = np.abs(data)
-            threshold = np.mean(abs_data) * 0.1
-            
-            if np.max(abs_data) > threshold:
-                start_idx = np.where(abs_data > threshold)[0][0]
-                data = data[start_idx:]
-            
-            # STFT
-            f, t, Zxx = stft(data, fs=samplerate, nperseg=1024, noverlap=512)
-            
-            # Convert to dB
-            Zxx_db = 20 * np.log10(np.abs(Zxx) + 1e-10)
-            baseline_spectra.append(Zxx_db)
-            
-            # Track minimum time dimension
-            min_time_bins = min(min_time_bins, Zxx_db.shape[1])
-            
-            print(f"✓ Loaded: {baseline_file.name} - Shape: {Zxx_db.shape}")
-            
-        except Exception as e:
-            print(f"✗ Error loading {baseline_file.name}: {e}")
-    
-    if len(baseline_spectra) == 0:
-        print("\nWARNING: No baseline files loaded!")
+CHIRP_SAMPLES = (CHIRP_DUR_MS * SAMPLE_RATE) // 1000
+GAP_SAMPLES = (GAP_DUR_MS * SAMPLE_RATE) // 1000
+PERIOD_SAMPLES = CHIRP_SAMPLES + GAP_SAMPLES
+PERIOD_SEC = PERIOD_SAMPLES / SAMPLE_RATE
+
+TARGET_DIST_M = (0.10, 0.50)
+TARGET_TAP_MIN = int(2 * TARGET_DIST_M[0] / SOUND_SPEED * SAMPLE_RATE)
+TARGET_TAP_MAX = int(2 * TARGET_DIST_M[1] / SOUND_SPEED * SAMPLE_RATE)
+
+SAR_WINDOW = 15
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+RAW_DATA = SCRIPT_DIR / "sar_raw_data"
+FIG_DIR = SCRIPT_DIR / "figures"
+PER_CHIRP_DIR = FIG_DIR / "per_chirp"
+SAR_DIR = FIG_DIR / "sar"
+PER_CHIRP_DIR.mkdir(parents=True, exist_ok=True)
+SAR_DIR.mkdir(parents=True, exist_ok=True)
+
+REFERENCE_PCM = SCRIPT_DIR / "raw_data" / "transmitted_chirp" / "chirp_reference_set2 (2).pcm"
+
+# ───────────── IRB PARSING ─────────────
+IRB_RE = re.compile(r"^(\d+)_(\d{3})_(\d{2})_(\d{2})")
+
+FOOD_NAMES = {
+    0: "Idle",
+    1: "Tortilla", 2: "Mandarin", 3: "Chicken_Breast",
+    4: "Cheeze_It", 5: "Carrots", 6: "Chocolate",
+    7: "Yogurt", 8: "Noodles", 9: "Water", 10: "Coke",
+}
+
+def parse_irb_filename(path):
+    m = IRB_RE.match(path.name)
+    if not m:
         return None
-    
-    print(f"\nCropping all baselines to common size: (513, {min_time_bins})")
-    
-    # Crop all to same size
-    baseline_spectra_cropped = []
-    for spec in baseline_spectra:
-        cropped = spec[:, :min_time_bins]
-        baseline_spectra_cropped.append(cropped)
-    
-    # Average in log domain (this is the least squares approach)
-    baseline_avg = np.mean(baseline_spectra_cropped, axis=0)
-    
-    print(f"\n✓ Interference channel estimated from {len(baseline_spectra)} baselines")
-    print(f"  Channel shape: {baseline_avg.shape}")
-    print("="*60 + "\n")
-    
-    return baseline_avg
+    food_code = int(m.group(3))
+    return {
+        "path": path,
+        "food_code": food_code,
+        "food_name": FOOD_NAMES.get(food_code, "Unknown"),
+        "is_idle": food_code == 0,
+        "is_eating": food_code != 0,
+    }
 
-# ----- MAIN PROCESSING -----
+def discover_files(folder):
+    return [parse_irb_filename(f) for f in folder.glob("*.pcm") if parse_irb_filename(f)]
 
-# Get all PCM files
-all_pcm_files = list(Path(raw_data_folder).glob("*.pcm"))
+# ───────────── LOAD ─────────────
+def load_reference_chirp():
+    raw = np.fromfile(REFERENCE_PCM, dtype=np.int16).astype(np.float64) / 32768.0
+    return raw[:CHIRP_SAMPLES]
 
-# Separate baselines from data files
-baseline_files = [f for f in all_pcm_files if 'baseline' in f.name.lower() or 'idle' in f.name.lower()]
-data_files = [f for f in all_pcm_files if f not in baseline_files]
+def load_pcm_left(path):
+    raw = np.fromfile(path, dtype=np.int16)
+    raw = raw[:len(raw)//2*2]
+    return raw.reshape(-1,2)[:,0].astype(np.float64) / 32768.0
 
-if not all_pcm_files:
-    print(f"No .pcm files found in '{raw_data_folder}' folder.")
-    exit()
+# ───────────── SEGMENT ─────────────
+def segment_chirps(signal):
+    n = len(signal) // PERIOD_SAMPLES
+    return [signal[i*PERIOD_SAMPLES : i*PERIOD_SAMPLES + CHIRP_SAMPLES] for i in range(n)]
 
-print(f"Found {len(all_pcm_files)} total PCM files:")
-print(f"  - {len(baseline_files)} baseline files")
-print(f"  - {len(data_files)} data files")
+# ───────────── LEAST SQUARES (AIM CORE) ─────────────
+def estimate_channel_ls(y, x, L=200):
+    N = len(y)
+    X = np.zeros((N, L))
+    for i in range(L):
+        X[i:, i] = x[:N-i]
+    h, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
+    return h
 
-# Estimate interference channel
-if len(baseline_files) > 0:
-    interference_channel = estimate_interference_channel(baseline_files, samplerate)
-else:
-    interference_channel = None
-    print("\nNo baseline files found - proceeding without interference cancellation\n")
+def reconstruct_target_signal(h, x):
+    y_clean = np.zeros_like(x)
+    for i in range(len(h)):
+        if TARGET_TAP_MIN <= i <= TARGET_TAP_MAX:
+            y_clean += h[i] * np.roll(x, i)
+    return y_clean
 
-# Process each data file
-for pcm_file in data_files:
-    print(f"\n{'='*60}")
-    print(f"Processing: {pcm_file.name}")
-    print(f"{'='*60}")
-    
-    file_basename = pcm_file.stem
-    output_folder = Path(analyzed_data_folder) / file_basename
-    os.makedirs(output_folder, exist_ok=True)
-    
-    # ----- 1. LOAD PCM (STEREO) -----
-    try:
-        data_raw = np.fromfile(pcm_file, dtype=np.int16)
-        data_stereo = data_raw.reshape(-1, 2)
-        data = data_stereo[:, 0].astype(np.float32) / 32768.0
-        print(f"Loaded {len(data)} samples (stereo)")
-    except Exception as e:
-        print(f"Error loading {pcm_file.name}: {e}")
-        continue
-    
-    # ----- 2. DISCARD DIRECT PATH -----
-    reflection_samples = int((0.30 / 343) * samplerate)
-    data = data[reflection_samples:]
-    print(f"Remaining: {len(data)} samples")
-    
-    # ----- 3. SEGMENT SIGNAL (Peak Detection) -----
-    abs_data = np.abs(data)
-    
-    # Smooth envelope
-    window = 2205
-    envelope = np.convolve(abs_data, np.ones(window)/window, mode='same')
-    
-    # Find peaks
-    threshold = np.mean(envelope) + np.std(envelope)
-    peaks, _ = find_peaks(envelope, height=threshold, distance=1000)
-    
-    if len(peaks) > 0:
-        start = max(0, peaks[0] - 1000)
-        data = data[start:]
-        print(f"Segmented at sample {start}")
-    
-    # ----- 4. STFT (NO FILTERING) -----
-    f, t, Zxx = stft(data, fs=samplerate, nperseg=1024, noverlap=512)
-    
-    # Convert to dB
-    Zxx_db = 20 * np.log10(np.abs(Zxx) + 1e-10)
-    
-    # Store original for comparison
-    Zxx_db_original = Zxx_db.copy()
-    t_original = t.copy()
-    
-    # ----- 5. INTERFERENCE CANCELLATION (Least Squares) -----
-    if interference_channel is not None:
-        # Crop both to same size
-        min_time = min(Zxx_db.shape[1], interference_channel.shape[1])
-        
-        Zxx_db = Zxx_db[:, :min_time]
-        t = t[:min_time]
-        channel_cropped = interference_channel[:, :min_time]
-        
-        # Subtract in log domain (log(a) - log(b) = log(a/b))
-        Zxx_db_clean = Zxx_db - channel_cropped
-        print(f"✓ Applied interference cancellation (shape: {Zxx_db_clean.shape})")
-    else:
-        Zxx_db_clean = Zxx_db
-    
-    # ----- 6. PLOT SPECTROGRAMS -----
-    
-    # Calculate vmin/vmax
-    freq_mask = (f >= 18000) & (f <= 20000)
-    relevant_data = Zxx_db_clean[freq_mask, :]
-    
-    vmin = np.percentile(relevant_data, 1)
-    vmax = np.percentile(relevant_data, 95)
-    
-    # Create comparison plot
-    if interference_channel is not None:
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
-        
-        # Before interference cancellation
-        ax1.pcolormesh(t, f, Zxx_db, shading='gouraud', cmap='jet', vmin=vmin, vmax=vmax)
-        ax1.set_title(f"Before Interference Cancellation - {file_basename}")
-        ax1.set_xlabel("Time (s)")
-        ax1.set_ylabel("Frequency (Hz)")
-        ax1.set_ylim(15000, 22000)
-        ax1.set_xlim(0, t[-1])
-        
-        # After interference cancellation
-        im = ax2.pcolormesh(t, f, Zxx_db_clean, shading='gouraud', cmap='jet', vmin=vmin, vmax=vmax)
-        ax2.set_title(f"After Interference Cancellation - {file_basename}")
-        ax2.set_xlabel("Time (s)")
-        ax2.set_ylabel("Frequency (Hz)")
-        ax2.set_ylim(15000, 22000)
-        ax2.set_xlim(0, t[-1])
-        
-        plt.colorbar(im, ax=[ax1, ax2], label='Magnitude (dB)')
-        plt.tight_layout()
-        
-    else:
-        # Single plot
-        fig, ax = plt.subplots(1, 1, figsize=(14, 7))
-        im = ax.pcolormesh(t, f, Zxx_db_clean, shading='gouraud', cmap='jet', vmin=vmin, vmax=vmax)
-        ax.set_title(f"Spectrogram - {file_basename}")
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel("Frequency (Hz)")
-        ax.set_ylim(15000, 22000)
-        ax.set_xlim(0, t[-1])
-        plt.colorbar(im, label='Magnitude (dB)')
-        plt.tight_layout()
-    
-    plt.savefig(output_folder / "spectrogram.png", dpi=150, bbox_inches='tight')
+# ───────────── TAP PROFILE ─────────────
+def compute_tap_profile(rx, ref):
+    Nfft = 1 << (2*len(rx)-1).bit_length()
+    RX = np.fft.fft(rx, n=Nfft)
+    REF = np.fft.fft(ref, n=Nfft)
+    taps = np.fft.ifft(RX * np.conj(REF))
+    return taps[:CHIRP_SAMPLES]
+
+def taps_to_dist(n):
+    return np.arange(n) / SAMPLE_RATE * SOUND_SPEED / 2
+
+# ───────────── PLOT PER CHIRP ─────────────
+def plot_chirp(i, chirp, ref, label):
+    taps = compute_tap_profile(chirp, ref)
+    dist = taps_to_dist(len(taps))
+
+    f,t,S = scipy_spectrogram(chirp, fs=SAMPLE_RATE, nperseg=512, noverlap=256)
+
+    fig,ax = plt.subplots(1,3,figsize=(15,4))
+    fig.suptitle(f"{label} Chirp {i}")
+
+    ax[0].plot(chirp)
+    ax[0].set_title("Time")
+
+    ax[1].pcolormesh(t,f,10*np.log10(S+1e-12))
+    ax[1].set_title("Spectrogram")
+
+    ax[2].plot(dist,np.abs(taps))
+    ax[2].set_title("Tap Profile")
+
+    plt.savefig(PER_CHIRP_DIR/f"{label}_{i}.png")
     plt.close()
-    print(f"Saved: {output_folder / 'spectrogram.png'}")
 
-print(f"\n{'='*60}")
-print("Processing complete!")
-print(f"{'='*60}")
+# ───────────── BUILD S(n,k) ─────────────
+def build_matrix(all_taps):
+    z0,z1 = TARGET_TAP_MIN,TARGET_TAP_MAX
+    return np.array([t[z0:z1] for t in all_taps])
+
+# ───────────── SAR PROCESS ─────────────
+def process_sar(S):
+    results=[]
+    for i in range(len(S)-SAR_WINDOW):
+        win = S[i:i+SAR_WINDOW]
+
+        win = win - np.mean(win,axis=0,keepdims=True)
+
+        fft = np.fft.fft(win,axis=0)
+
+        template = np.mean(fft,axis=1,keepdims=True)
+        template /= (np.abs(template)+1e-12)
+
+        filtered = fft * np.conj(template)
+
+        results.append((i,filtered))
+    return results
+
+# ───────────── STACK PLOT ─────────────
+def plot_stack(S,label):
+    plt.imshow(np.abs(S),aspect='auto',origin='lower')
+    plt.title(label)
+    plt.savefig(SAR_DIR/f"stack_{label}.png")
+    plt.close()
+
+# ───────────── MAIN ─────────────
+def main():
+    files = discover_files(RAW_DATA)
+
+    idle = [f for f in files if f["is_idle"]][0]
+    eat = [f for f in files if f["is_eating"]][0]
+
+    ref = load_reference_chirp()
+
+    for info,label in [(eat,"EATING"),(idle,"IDLE")]:
+        signal = load_pcm_left(info["path"])
+        chirps = segment_chirps(signal)
+
+        all_taps=[]
+
+        for i,c in enumerate(chirps):
+            # 🔥 LEAST SQUARES CLEANING
+            h = estimate_channel_ls(c,ref)
+            clean = reconstruct_target_signal(h,ref)
+
+            taps = compute_tap_profile(clean,ref)
+            all_taps.append(taps)
+
+            plot_chirp(i,clean,ref,label)
+
+        S = build_matrix(all_taps)
+
+        plot_stack(S,label)
+
+        sar = process_sar(S)
+
+        print(f"{label} done with {len(chirps)} chirps")
+
+if __name__ == "__main__":
+    main()

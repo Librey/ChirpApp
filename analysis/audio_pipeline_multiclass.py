@@ -19,9 +19,8 @@ import numpy as np
 import pandas as pd
 import librosa
 import cv2
-import spafe.features.gfcc as gfcc_feature
-
 from scipy.signal import butter, lfilter
+from scipy.fft import dct as scipy_dct
 from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 import matplotlib.pyplot as plt
@@ -61,17 +60,16 @@ EATING_FOLDERS = [f"{i:03d}" for i in range(1, 21)]
 IRB_RE = re.compile(r"^(\d+)_(\d{3})_(\d{2})_(\d{2})$")
 
 FOOD_NAMES = {
-    1:  "Water",
-    2:  "Crackers",
-    3:  "Potato_Chips",
-    4:  "Chocolate_Bar",
-    5:  "Baby_Carrots",
-    6:  "Apple_Slice",
-    7:  "Almonds",
-    8:  "Cereal",
-    9:  "Gummy_Bears",
-    10: "Pistachios",
-    11: "Peanuts"
+    1:  "Tortilla",
+    2:  "Mandarin",
+    3:  "Chicken_Breast",
+    4:  "Cheeze_It",
+    5:  "Carrots",
+    6:  "Chocolate",
+    7:  "Yogurt",
+    8:  "Noodles",
+    9:  "Water",
+    10: "Coke"
 }
 
 # ─────────────────────────────────────────

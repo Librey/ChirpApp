@@ -1,4 +1,4 @@
 Feature,Accuracy,F1 (Weighted)
 STFT (64x64),0.7302,0.7296
 MFCC (80x64),0.5035,0.501
-GFCC (20x64),0.1681,0.0484
+GFCC (20x64),0.476,0.4703

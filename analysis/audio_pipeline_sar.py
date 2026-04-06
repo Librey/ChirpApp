@@ -1,338 +1,413 @@
-"""
-SensEat: SAR Dechirp Pipeline
-==============================
-Based on the approach from MobiSys '18: "AIM: Acoustic Imaging on a Mobile"
-
-HOW IT WORKS:
-  1. The Android app generates a chirp signal and saves it as a reference PCM file
-     (chirp_reference_set2.pcm) before playing it through the speaker.
-  2. The microphone records reflections and saves them as a stereo PCM file.
-  3. Here in Python: load both PCM files and multiply them.
-     That's the dechirp — no filters needed.
-  4. FFT of the multiplied signal → beat frequencies → these map to distances.
-
-The reference PCM is: MONO, 16-bit little-endian, 44100 Hz, 1.5s (one full period).
-The recorded PCM is: STEREO, 16-bit little-endian, 44100 Hz, 30s.
-
-IMPORTANT:
-  The reference chirp must be the ACTUAL file saved from the Android app
-  (chirp_reference_set2.pcm), NOT a mathematically generated signal.
-  The Android app uses:  amp = sin(2π · freq(t) · t)
-  which is different from the standard linear chirp formula and must match exactly.
-
-Android app chirp formula (generateChirpSamplesWithGaps, setting 2):
-  chirpDurationMs = 1000ms,  gapDurationMs = 500ms
-  freq(t) = 18000 + (20000 - 18000) * (t / 1.0)
-  amp(i)  = sin(2π · freq(t) · t)   where t = i / 44100
-"""
-
 import os
+import re
 import warnings
 from pathlib import Path
 
 import numpy as np
-from scipy.signal import spectrogram
 import matplotlib.pyplot as plt
+from scipy.signal import spectrogram as scipy_spectrogram
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-warnings.filterwarnings('ignore')
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+warnings.filterwarnings("ignore")
 
-# ─────────────────────────────────────────
-# CONFIG  (must match Android app exactly)
-# ─────────────────────────────────────────
-SAMPLE_RATE       = 44100
-CHIRP_START_HZ    = 18_000.0
-CHIRP_END_HZ      = 20_000.0
-CHIRP_DUR_MS      = 1000                             # setting 2
-GAP_DUR_MS        = 500                              # setting 2
-CHIRP_SAMPLES     = (CHIRP_DUR_MS * SAMPLE_RATE) // 1000   # 44100
-GAP_SAMPLES       = (GAP_DUR_MS  * SAMPLE_RATE) // 1000   # 22050
-PERIOD_SAMPLES    = CHIRP_SAMPLES + GAP_SAMPLES             # 66150
-PERIOD_S          = PERIOD_SAMPLES / SAMPLE_RATE            # 1.5 s
+# ───────────────── CONFIG ─────────────────
+SAMPLE_RATE = 44100
+CHIRP_DUR_MS = 1000
+GAP_DUR_MS = 500
+SOUND_SPEED = 343.0  # m/s
+
+CHIRP_SAMPLES = (CHIRP_DUR_MS * SAMPLE_RATE) // 1000
+GAP_SAMPLES = (GAP_DUR_MS * SAMPLE_RATE) // 1000
+PERIOD_SAMPLES = CHIRP_SAMPLES + GAP_SAMPLES
+PERIOD_SEC = PERIOD_SAMPLES / SAMPLE_RATE
+
+# Mouth-distance hypothesis window (adjust if needed)
+TARGET_DIST_M = (0.10, 0.50)
+TARGET_TAP_MIN = int(2 * TARGET_DIST_M[0] / SOUND_SPEED * SAMPLE_RATE)
+TARGET_TAP_MAX = int(2 * TARGET_DIST_M[1] / SOUND_SPEED * SAMPLE_RATE)
+
+# Small chirp window to form SAR aperture across time
+SAR_WINDOW = 5
+SAR_STRIDE = 1
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-RAW_DATA   = SCRIPT_DIR / "raw_data"
-FIG_DIR    = SCRIPT_DIR / "figures"
-FIG_DIR.mkdir(exist_ok=True)
+RAW_DATA = SCRIPT_DIR / "sar_raw_data"
+FIG_DIR = SCRIPT_DIR / "figures"
+PER_CHIRP_DIR = FIG_DIR / "per_chirp"
+SAR_DIR = FIG_DIR / "sar_windows"
+PER_CHIRP_DIR.mkdir(parents=True, exist_ok=True)
+SAR_DIR.mkdir(parents=True, exist_ok=True)
 
-# Reference chirp PCM saved from the Android app
-# Using the file uploaded to raw_data/transmitted_chirp/
-REFERENCE_PCM = SCRIPT_DIR / "raw_data" / "transmitted_chirp" / "chirp_reference_set2 (2).pcm"
+REFERENCE_PCM = (
+    SCRIPT_DIR / "raw_data" / "transmitted_chirp" / "chirp_reference_set2 (2).pcm"
+)
+
+# ───────────── IRB PARSING ─────────────
+# Accepts normal names and accidental duplicates like "... (1).pcm"
+IRB_RE = re.compile(r"^(\d+)_(\d{3})_(\d{2})_(\d{2})(?:\s*\(\d+\))?\.pcm$")
+
+FOOD_NAMES = {
+    0: "Idle",
+    1: "Tortilla",
+    2: "Mandarin",
+    3: "Chicken_Breast",
+    4: "Cheeze_It",
+    5: "Carrots",
+    6: "Chocolate",
+    7: "Yogurt",
+    8: "Noodles",
+    9: "Water",
+    10: "Coke",
+}
 
 
-# ─────────────────────────────────────────
-# LOAD FUNCTIONS
-# ─────────────────────────────────────────
+def parse_irb_filename(path: Path):
+    m = IRB_RE.match(path.name)
+    if not m:
+        return None
+    institution = int(m.group(1))
+    participant_id = int(m.group(2))
+    food_code = int(m.group(3))
+    recording_num = int(m.group(4))
+    return {
+        "path": path,
+        "institution": institution,
+        "participant_id": participant_id,
+        "food_code": food_code,
+        "food_name": FOOD_NAMES.get(food_code, f"Unknown_{food_code}"),
+        "recording_num": recording_num,
+        "is_idle": food_code == 0,
+        "is_eating": food_code != 0,
+    }
 
+
+def discover_files(folder: Path):
+    parsed = []
+    for f in sorted(folder.glob("*.pcm")):
+        info = parse_irb_filename(f)
+        if info:
+            parsed.append(info)
+    return parsed
+
+
+# ───────────── LOAD ─────────────
 def load_reference_chirp() -> np.ndarray:
-    """
-    Load the reference chirp from the PCM file saved by the Android app.
-
-    The Android app saves chirpSamples (MONO, 16-bit LE, 44100 Hz) before
-    playing it through the speaker. This is the exact signal that was
-    transmitted — use it directly as the dechirp reference.
-
-    Falls back to replicating the Android formula if the file is not found.
-    """
-    if REFERENCE_PCM.exists():
-        print(f"  Loading reference chirp from: {REFERENCE_PCM.name}")
-        raw = np.fromfile(REFERENCE_PCM, dtype=np.int16)
-        return raw.astype(np.float64) / 32768.0   # normalise to [-1, 1]
-
-    # ── Fallback: replicate the EXACT Android formula ──────────────────────
-    # This matches generateChirpSamplesWithGaps(setting=2) in MainActivity.kt:
-    #   freq = chirpStartHz + (chirpEndHz - chirpStartHz) * (t / (chirpDurationMs/1000))
-    #   amp  = sin(2π · freq · t)
-    # Note: this is NOT the standard linear chirp formula. It differs from
-    # sin(2π·(f0·t + (f1-f0)·t²/(2T))). Using this fallback is approximate.
-    # use the actual saved file, not a generated one.
-    print(f"  WARNING: {REFERENCE_PCM.name} not found.")
-    print(f"  Using Android formula fallback — save the real file from the app!")
-
-    ref = np.zeros(PERIOD_SAMPLES, dtype=np.float64)
-    for i in range(CHIRP_SAMPLES):
-        t = i / SAMPLE_RATE
-        freq = CHIRP_START_HZ + (CHIRP_END_HZ - CHIRP_START_HZ) * (t / (CHIRP_DUR_MS / 1000.0))
-        ref[i] = np.sin(2 * np.pi * freq * t)
-    # gap remains zero
-    return ref
+    if not REFERENCE_PCM.exists():
+        raise FileNotFoundError(f"Reference chirp not found: {REFERENCE_PCM}")
+    raw = np.fromfile(REFERENCE_PCM, dtype=np.int16).astype(np.float64) / 32768.0
+    if len(raw) < CHIRP_SAMPLES:
+        raise ValueError(
+            f"Reference chirp too short: expected at least {CHIRP_SAMPLES}, got {len(raw)}"
+        )
+    return raw[:CHIRP_SAMPLES]
 
 
-def load_recorded_pcm_left(filepath) -> np.ndarray:
-    """
-    Load the recorded stereo PCM from the microphone.
-    Extract the LEFT channel and normalise to [-1, 1].
-    """
-    raw = np.fromfile(filepath, dtype=np.int16)
-    if raw.size % 2:
-        raw = raw[:-1]
+def load_pcm_left(path: Path) -> np.ndarray:
+    raw = np.fromfile(path, dtype=np.int16)
+    raw = raw[: len(raw) // 2 * 2]  # force even length
     stereo = raw.reshape(-1, 2)
     return stereo[:, 0].astype(np.float64) / 32768.0
 
 
-# ─────────────────────────────────────────
-# DECHIRP: just multiply
-# ─────────────────────────────────────────
-
-def dechirp(rx_period: np.ndarray, ref_chirp: np.ndarray) -> np.ndarray:
+# ───────────── SEGMENTATION ─────────────
+def segment_chirps(signal: np.ndarray):
     """
-    FMCW dechirp as described in the AIM paper :
-      IF_signal = received_signal  ×  reference_chirp
-
-    No filters. No DC removal. Just multiply.
-
-    The chirp portion of rx_period (first CHIRP_SAMPLES samples) is multiplied
-    by the reference chirp. The result contains beat frequencies that map
-    directly to the distance of the reflector:
-        f_beat [Hz]  →  R [m]  =  f_beat * c * T / (2 * BW)
-    """
-    # Only use the chirp portion (not the gap)
-    rx   = rx_period[:CHIRP_SAMPLES]
-    ref  = ref_chirp[:CHIRP_SAMPLES]
-    n    = min(len(rx), len(ref))
-    return rx[:n] * ref[:n]
-
-
-# ─────────────────────────────────────────
-# BUILD 2D IF MATRIX  s(n, k)
-# ─────────────────────────────────────────
-
-def build_if_matrix(signal: np.ndarray, ref_chirp: np.ndarray) -> np.ndarray:
-    """
-    Stack dechirped signals from every chirp period into a 2D matrix s(n, k).
-
-      n = chirp (azimuth / time) index   → rows
-      k = IF sample (range) index        → columns
-
-    This is the core of the SAR approach from the AIM paper:
-    the 2D matrix captures both range (k) and time/Doppler (n) information.
+    Split recording into chirp-active sections only.
+    Assumes each cycle is [1.0 s chirp][0.5 s gap].
     """
     n_periods = len(signal) // PERIOD_SAMPLES
-    if n_periods == 0:
-        raise ValueError("Recording too short for even one chirp period.")
-
-    S = np.zeros((n_periods, CHIRP_SAMPLES), dtype=np.float64)
-
-    for n in range(n_periods):
-        start    = n * PERIOD_SAMPLES
-        rx_chunk = signal[start : start + PERIOD_SAMPLES]
-        S[n]     = dechirp(rx_chunk, ref_chirp)
-
-    return S   # shape: (N_periods, CHIRP_SAMPLES)
+    chirps = []
+    for i in range(n_periods):
+        start = i * PERIOD_SAMPLES
+        chirp_only = signal[start : start + CHIRP_SAMPLES]
+        if len(chirp_only) == CHIRP_SAMPLES:
+            chirps.append(chirp_only)
+    return chirps
 
 
-# ─────────────────────────────────────────
-# RANGE PROFILE: FFT of each IF row
-# ─────────────────────────────────────────
-
-def range_profile_matrix(S: np.ndarray) -> tuple:
+# ───────────── TAP / RANGE PROFILE ─────────────
+def compute_tap_profile(rx_chirp: np.ndarray, ref_chirp: np.ndarray) -> np.ndarray:
     """
-    FFT each row of the IF matrix to get the range profile per chirp period.
-
-    The FFT of the dechirped IF signal gives frequency bins. Each bin k
-    corresponds to a beat frequency f_beat = k / T_chirp Hz, which maps to:
-        R = f_beat * c * T / (2 * BW)
-          = k * (343.0 * 1.0) / (2 * 2000)
-          = k * 0.08575 m
-
-    Returns:
-        RT       : Range-Time matrix   (N_periods × N_freq_bins)
-        range_m  : range axis in metres
+    FFT-based cross-correlation in delay domain.
+    Positive lag k corresponds to round-trip delay.
+    This gives a per-chirp range/tap profile, similar in spirit to
+    AIM's tap/channel view before higher-level SAR formatting.
     """
-    # rfft: real input → positive frequencies only
-    RT      = np.abs(np.fft.rfft(S, axis=1))          # (N, CHIRP_SAMPLES//2+1)
-    n_bins  = RT.shape[1]
-
-    # Frequency of bin k = k * (fs / N) = k * (44100 / 44100) = k Hz
-    # (since the IF signal spans T_chirp = 1.0 s → frequency resolution = 1 Hz)
-    freq_hz = np.arange(n_bins, dtype=np.float64)      # Hz
-    beat_to_range = SOUND_SPEED * (CHIRP_DUR_MS / 1000.0) / (2.0 * (CHIRP_END_HZ - CHIRP_START_HZ))
-    range_m = freq_hz * beat_to_range                  # metres
-
-    return RT, range_m
+    nfft = 1 << (2 * len(rx_chirp) - 1).bit_length()
+    RX = np.fft.fft(rx_chirp, n=nfft)
+    REF = np.fft.fft(ref_chirp, n=nfft)
+    taps = np.fft.ifft(RX * np.conj(REF))
+    return taps[:CHIRP_SAMPLES]
 
 
-SOUND_SPEED = 343.0   # m/s
+def taps_to_distance_m(num_taps: int) -> np.ndarray:
+    tap_idx = np.arange(num_taps)
+    return tap_idx / SAMPLE_RATE * SOUND_SPEED / 2.0
 
 
-# ─────────────────────────────────────────
-# 2D FFT → SAR IMAGE
-# ─────────────────────────────────────────
+# ───────────── PER-CHIRP VISUALIZATION ─────────────
+def plot_and_save_chirp(
+    chirp_idx: int,
+    rx_chirp: np.ndarray,
+    ref_chirp: np.ndarray,
+    label: str,
+    save_dir: Path,
+):
+    taps = compute_tap_profile(rx_chirp, ref_chirp)
+    tap_mag = np.abs(taps)
+    tap_phase = np.angle(taps)
+    dist_m = taps_to_distance_m(CHIRP_SAMPLES)
 
-def sar_image(S: np.ndarray, range_m: np.ndarray) -> tuple:
+    t_ms = np.arange(CHIRP_SAMPLES) / SAMPLE_RATE * 1000.0
+
+    f_s, t_s, Sxx = scipy_spectrogram(
+        rx_chirp,
+        fs=SAMPLE_RATE,
+        nperseg=512,
+        noverlap=256,
+        mode="magnitude",
+    )
+
+    z0, z1 = TARGET_TAP_MIN, min(TARGET_TAP_MAX, len(taps))
+
+    fig, axes = plt.subplots(1, 5, figsize=(24, 4))
+    fig.suptitle(f"{label} | Chirp {chirp_idx:03d}", fontsize=11, fontweight="bold")
+
+    # 1. Time-domain waveform
+    axes[0].plot(t_ms, rx_chirp, linewidth=0.5)
+    axes[0].set_title("Time Domain")
+    axes[0].set_xlabel("Time (ms)")
+    axes[0].set_ylabel("Amplitude")
+
+    # 2. Spectrogram
+    axes[1].pcolormesh(
+        t_s * 1000,
+        f_s / 1000,
+        20 * np.log10(Sxx + 1e-12),
+        shading="gouraud",
+        cmap="inferno",
+    )
+    axes[1].set_title("Spectrogram")
+    axes[1].set_xlabel("Time (ms)")
+    axes[1].set_ylabel("Frequency (kHz)")
+
+    # 3. Full tap profile
+    axes[2].plot(dist_m, tap_mag, linewidth=0.7)
+    axes[2].axvspan(
+        TARGET_DIST_M[0],
+        TARGET_DIST_M[1],
+        alpha=0.2,
+        color="green",
+        label="Target window",
+    )
+    axes[2].set_title("Tap Profile")
+    axes[2].set_xlabel("Distance (m)")
+    axes[2].set_ylabel("|Amplitude|")
+    axes[2].legend(fontsize=7)
+
+    # 4. Target-window magnitude
+    axes[3].plot(dist_m[z0:z1], tap_mag[z0:z1], linewidth=0.9)
+    axes[3].set_title("Target Window (mag)")
+    axes[3].set_xlabel("Distance (m)")
+    axes[3].set_ylabel("|Amplitude|")
+
+    # 5. Target-window phase
+    axes[4].plot(dist_m[z0:z1], tap_phase[z0:z1], linewidth=0.9)
+    axes[4].set_title("Target Window (phase)")
+    axes[4].set_xlabel("Distance (m)")
+    axes[4].set_ylabel("Phase (rad)")
+    axes[4].set_ylim(-np.pi, np.pi)
+
+    plt.tight_layout()
+    out = save_dir / f"{label}_chirp_{chirp_idx:03d}.png"
+    plt.savefig(out, dpi=110, bbox_inches="tight")
+    plt.close(fig)
+
+
+# ───────────── BUILD SAR MATRIX ─────────────
+def build_sar_matrix_from_taps(all_taps: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     """
-    Apply 2D FFT to the IF matrix to get the SAR image, as done in AIM.
-
-    AIM Section 2: the IF signal for a point reflector is a 2D sinusoid.
-    2D FFT maps each reflector to a spike in frequency space → the image.
-
-      Range  axis  (columns): FFT of k → beat frequency → distance
-      Azimuth axis (rows)   : FFT of n → Doppler → jaw velocity / cross-range
-
-    Returns:
-        image      : 2D magnitude (N_periods × N_freq_bins)
-        doppler_hz : Doppler frequency axis (centred at 0)
+    Stack the target window from each chirp to build S(n,k):
+      n = chirp index (time aperture)
+      k = target-range bins
     """
-    RT = np.abs(np.fft.rfft(S, axis=1))   # range FFT first
-
-    # Azimuth FFT (across chirp periods), fftshift to centre zero-Doppler
-    SAR = np.fft.fftshift(np.fft.fft(RT, axis=0), axes=0)
-    image = np.abs(SAR)
-
-    PRF        = 1.0 / PERIOD_S                              # pulse repetition freq
-    N_periods  = S.shape[0]
-    doppler_hz = np.fft.fftshift(np.fft.fftfreq(N_periods, d=1.0 / PRF))
-
-    return image, doppler_hz
+    z0 = TARGET_TAP_MIN
+    z1 = min(TARGET_TAP_MAX, len(all_taps[0]))
+    S = np.array([t[z0:z1] for t in all_taps], dtype=np.complex128)
+    dist_m = taps_to_distance_m(z1)[z0:z1]
+    return S, dist_m
 
 
-# ─────────────────────────────────────────
-# FULL PIPELINE
-# ─────────────────────────────────────────
+# ───────────── SAR CORE ON SMALL WINDOWS ─────────────
+def process_sar_windows(S: np.ndarray):
+    """
+    Process small windows of stacked chirps.
+    This is the correct SAR-like stage:
+      - use multiple chirps, not one row
+      - FFT across n (rows) for each k (column)
+      - apply a simple matched filter
+    """
+    if S.shape[0] < SAR_WINDOW:
+        raise ValueError(
+            f"Need at least {SAR_WINDOW} chirps, got {S.shape[0]}"
+        )
 
-def run_pipeline(pcm_path, ref_chirp: np.ndarray, label: str) -> dict:
-    """Run the full SAR pipeline on one recording."""
-    print(f"\n[SAR] {label}: {Path(pcm_path).name}")
+    results = []
+    for start in range(0, S.shape[0] - SAR_WINDOW + 1, SAR_STRIDE):
+        end = start + SAR_WINDOW
+        S_win = S[start:end].copy()
 
-    signal    = load_recorded_pcm_left(pcm_path)
-    S         = build_if_matrix(signal, ref_chirp)
-    RT, range_m = range_profile_matrix(S)
-    img, dop  = sar_image(S, range_m)
+        # Remove static/common component across chirps for each range bin
+        S_centered = S_win - np.mean(S_win, axis=0, keepdims=True)
 
-    print(f"  Chirp periods: {S.shape[0]}   Range bins: {S.shape[1]}")
-    return dict(S=S, RT=RT, img=img, range_m=range_m, dop_hz=dop)
+        # FFT on each column of IF/range matrix, across chirp index n
+        col_fft = np.fft.fft(S_centered, axis=0)
+
+        # Simple matched filter in transformed domain
+        template = np.mean(col_fft, axis=1, keepdims=True)
+        template = template / (np.abs(template) + 1e-12)
+        matched = np.conj(template)
+        filtered = col_fft * matched
+
+        results.append({
+            "start": start,
+            "end": end,
+            "S_win": S_win,
+            "S_centered": S_centered,
+            "col_fft": col_fft,
+            "matched": matched,
+            "filtered": filtered,
+        })
+    return results
 
 
-# ─────────────────────────────────────────
-# VISUALISATION
-# ─────────────────────────────────────────
+# ───────────── PLOT STACK / SAR WINDOWS ─────────────
+def plot_chirp_stack(S: np.ndarray, dist_m: np.ndarray, label: str, save_dir: Path):
+    chirp_times = np.arange(S.shape[0]) * PERIOD_SEC
+    fig, ax = plt.subplots(figsize=(10, 6))
+    im = ax.pcolormesh(
+        dist_m,
+        chirp_times,
+        np.abs(S),
+        shading="gouraud",
+        cmap="inferno",
+    )
+    plt.colorbar(im, ax=ax, label="|Amplitude|")
+    ax.set_title(f"{label} — Multi-Chirp Stack S(n,k)")
+    ax.set_xlabel("Distance (m)")
+    ax.set_ylabel("Time / chirp index (s)")
+    plt.tight_layout()
+    plt.savefig(save_dir / f"stack_{label}.png", dpi=120, bbox_inches="tight")
+    plt.close(fig)
 
-def visualize():
-    eat_pcm  = RAW_DATA / "002" / "1_002_02_01.pcm"
-    idle_pcm = RAW_DATA / "Idle-gp" / "1_000_00_01.pcm"
 
-    for p in [eat_pcm, idle_pcm]:
-        if not p.exists():
-            print(f"File not found: {p}")
-            return
+def plot_sar_window_result(result: dict, dist_m: np.ndarray, label: str, save_dir: Path):
+    start = result["start"]
+    end = result["end"]
+
+    S_mag = np.abs(result["S_centered"])
+    fft_mag = np.abs(result["col_fft"])
+    filt_mag = np.abs(result["filtered"])
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig.suptitle(f"{label} — SAR window chirps {start}..{end-1}", fontsize=11, fontweight="bold")
+
+    # 1. windowed S(n,k)
+    im0 = axes[0].imshow(
+        20 * np.log10(S_mag + 1e-12),
+        aspect="auto",
+        origin="lower",
+        cmap="plasma",
+        extent=[dist_m[0], dist_m[-1], start, end - 1],
+    )
+    axes[0].set_title("Windowed S(n,k)")
+    axes[0].set_xlabel("Distance (m)")
+    axes[0].set_ylabel("Chirp index")
+    plt.colorbar(im0, ax=axes[0], label="dB")
+
+    # 2. FFT on each column across chirps
+    im1 = axes[1].imshow(
+        20 * np.log10(fft_mag + 1e-12),
+        aspect="auto",
+        origin="lower",
+        cmap="viridis",
+        extent=[dist_m[0], dist_m[-1], 0, fft_mag.shape[0] - 1],
+    )
+    axes[1].set_title("Column FFT")
+    axes[1].set_xlabel("Distance (m)")
+    axes[1].set_ylabel("FFT bin across chirps")
+    plt.colorbar(im1, ax=axes[1], label="dB")
+
+    # 3. matched filtered
+    im2 = axes[2].imshow(
+        20 * np.log10(filt_mag + 1e-12),
+        aspect="auto",
+        origin="lower",
+        cmap="inferno",
+        extent=[dist_m[0], dist_m[-1], 0, filt_mag.shape[0] - 1],
+    )
+    axes[2].set_title("Matched Filter Output")
+    axes[2].set_xlabel("Distance (m)")
+    axes[2].set_ylabel("FFT bin across chirps")
+    plt.colorbar(im2, ax=axes[2], label="dB")
+
+    plt.tight_layout()
+    out = save_dir / f"{label}_sar_window_{start:03d}_{end-1:03d}.png"
+    plt.savefig(out, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+
+# ───────────── MAIN ─────────────
+def main():
+    files = discover_files(RAW_DATA)
+    idle_files = [f for f in files if f["is_idle"]]
+    eating_files = [f for f in files if f["is_eating"]]
+
+    if not idle_files or not eating_files:
+        raise ValueError("Need at least one idle and one eating file in sar_raw_data/")
+
+    idle_file = idle_files[0]
+    eat_file = eating_files[0]
+
+    print(f"Eating : {eat_file['path'].name} ({eat_file['food_name']})")
+    print(f"Idle   : {idle_file['path'].name}")
+    print(
+        f"Target distance window: {TARGET_DIST_M[0]}–{TARGET_DIST_M[1]} m "
+        f"(taps {TARGET_TAP_MIN}–{TARGET_TAP_MAX})"
+    )
 
     ref = load_reference_chirp()
 
-    eat  = run_pipeline(eat_pcm,  ref, "EATING")
-    idle = run_pipeline(idle_pcm, ref, "IDLE")
+    for info, label in [
+        (eat_file, f"EATING_{eat_file['food_name']}"),
+        (idle_file, "IDLE"),
+    ]:
+        signal = load_pcm_left(info["path"])
+        chirps = segment_chirps(signal)
+        print(f"\n{label}: {len(chirps)} chirps found")
 
-    # Zoom to jaw region: 0–35 cm
-    # Beat freq for 35 cm: f = 0.35 / 0.08575 ≈ 4.1 Hz → bin index ≈ 4
-    # We'll zoom to first 20 bins to show the relevant range
-    N_ZOOM = 20   # first 20 range bins = 0 to ~1.7 m (more than enough)
+        # Stage A: per-chirp understanding
+        all_taps = []
+        for i, chirp in enumerate(chirps):
+            taps = compute_tap_profile(chirp, ref)
+            all_taps.append(taps)
+            plot_and_save_chirp(i, chirp, ref, label, PER_CHIRP_DIR)
+            if (i + 1) % 5 == 0 or (i + 1) == len(chirps):
+                print(f"  saved {i+1}/{len(chirps)} per-chirp figures")
 
-    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-    fig.suptitle(
-        "SAR Dechirp Pipeline  (AIM method)\n"
-        "Received PCM  ×  Reference Chirp PCM  →  FFT  →  Beat Frequency = Distance",
-        fontsize=11, fontweight='bold'
-    )
+        # Stage B: true stacked SAR-like processing
+        S, dist_m = build_sar_matrix_from_taps(all_taps)
+        plot_chirp_stack(S, dist_m, label, SAR_DIR)
+        print(f"  saved stack_{label}.png")
 
-    r_zoom = eat['range_m'][:N_ZOOM] * 100   # cm
+        sar_results = process_sar_windows(S)
+        for idx, res in enumerate(sar_results):
+            plot_sar_window_result(res, dist_m, label, SAR_DIR)
+        print(f"  saved {len(sar_results)} SAR window figures")
 
-    # ── [0,0] Range-Time — Eating ──────────────────────────────────
-    ax = axes[0, 0]
-    t_eat = np.arange(eat['RT'].shape[0]) * PERIOD_S
-    im = ax.pcolormesh(
-        r_zoom, t_eat,
-        20 * np.log10(eat['RT'][:, :N_ZOOM] + 1e-12),
-        shading='gouraud', cmap='plasma'
-    )
-    plt.colorbar(im, ax=ax, label='dB')
-    ax.set_title("Range–Time Map  (Eating)")
-    ax.set_xlabel("Range (cm)  ≡  Beat Frequency × 8.575 cm/Hz")
-    ax.set_ylabel("Time (s)")
-
-    # ── [0,1] Range-Time — Idle ────────────────────────────────────
-    ax = axes[0, 1]
-    t_idle = np.arange(idle['RT'].shape[0]) * PERIOD_S
-    im = ax.pcolormesh(
-        idle['range_m'][:N_ZOOM] * 100, t_idle,
-        20 * np.log10(idle['RT'][:, :N_ZOOM] + 1e-12),
-        shading='gouraud', cmap='plasma'
-    )
-    plt.colorbar(im, ax=ax, label='dB')
-    ax.set_title("Range–Time Map  (Idle)")
-    ax.set_xlabel("Range (cm)")
-    ax.set_ylabel("Time (s)")
-
-    # ── [1,0] SAR Image (2D FFT) — Eating ─────────────────────────
-    ax = axes[1, 0]
-    im = ax.pcolormesh(
-        r_zoom, eat['dop_hz'],
-        20 * np.log10(eat['img'][:, :N_ZOOM] + 1e-12),
-        shading='gouraud', cmap='viridis'
-    )
-    plt.colorbar(im, ax=ax, label='dB')
-    ax.set_title("SAR Image  (Eating)\n2D FFT of IF matrix — Doppler vs Range")
-    ax.set_xlabel("Range (cm)")
-    ax.set_ylabel("Doppler (Hz)")
-    ax.axhline(0, color='white', linewidth=0.5, linestyle='--')
-
-    # ── [1,1] SAR Image (2D FFT) — Idle ───────────────────────────
-    ax = axes[1, 1]
-    im = ax.pcolormesh(
-        idle['range_m'][:N_ZOOM] * 100, idle['dop_hz'],
-        20 * np.log10(idle['img'][:, :N_ZOOM] + 1e-12),
-        shading='gouraud', cmap='viridis'
-    )
-    plt.colorbar(im, ax=ax, label='dB')
-    ax.set_title("SAR Image  (Idle)\n2D FFT of IF matrix — Doppler vs Range")
-    ax.set_xlabel("Range (cm)")
-    ax.set_ylabel("Doppler (Hz)")
-    ax.axhline(0, color='white', linewidth=0.5, linestyle='--')
-
-    plt.tight_layout()
-    out = FIG_DIR / "sar_aim_pipeline.png"
-    plt.savefig(out, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"\nSAR image saved -> {out}")
+    print(f"\nPer-chirp figures saved in:\n  {PER_CHIRP_DIR}")
+    print(f"SAR window figures saved in:\n  {SAR_DIR}")
 
 
-if __name__ == '__main__':
-    visualize()
+if __name__ == "__main__":
+    main()
