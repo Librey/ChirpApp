@@ -237,12 +237,8 @@ Simple, lightweight design to avoid overfitting on small datasets.
 
 ## 📄 License
 
-This project is part of Georgia State University coursework.
+This project is part of Georgia State University research.
 
 ---
 
-## 👤 Author
 
-David (DaveTron4)
-
-**Last Updated:** December 9, 2025
