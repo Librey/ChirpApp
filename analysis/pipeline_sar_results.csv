@@ -1,0 +1,9 @@
+task,model,feature,accuracy,precision,recall,f1
+binary,RF,SAR_flat,0.6382,0.7738,0.7275,0.7496
+binary,SVM,SAR_flat,0.4742,0.7413,0.4538,0.5626
+binary,kNN,SAR_flat,0.5582,0.7769,0.5662,0.6524
+binary,CNN,SAR_image,0.5755,0.7439,0.6633,0.6893
+multiclass,RF,SAR_flat,0.1868,0.184,0.1752,0.1693
+multiclass,SVM,SAR_flat,0.1895,0.1833,0.1706,0.162
+multiclass,kNN,SAR_flat,0.1818,0.1823,0.1779,0.1667
+multiclass,CNN,SAR_image,0.1709,0.1415,0.1496,0.1132
