@@ -1,0 +1,9 @@
+task,model,feature,accuracy,precision,recall,macro_f1,weighted_f1
+binary,SVM,flat_features,0.9075,0.7854,0.9375,0.834,0.9171
+binary,RF,flat_features,0.9875,0.992,0.9501,0.9698,0.9872
+binary,CNN,STFT,0.8873,0.7402,0.7375,0.7389,0.887
+binary,CNN,MFCC,0.8761,0.4381,0.5,0.467,0.8183
+multiclass,SVM,flat_features,0.2194,0.2149,0.2053,0.1916,0.2168
+multiclass,RF,flat_features,0.2454,0.2839,0.2047,0.1944,0.2296
+multiclass,CNN,STFT,0.2599,0.1035,0.2009,0.1275,0.1524
+multiclass,CNN,MFCC,0.1066,0.0836,0.1642,0.0661,0.0595

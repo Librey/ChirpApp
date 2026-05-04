@@ -4,3 +4,26 @@ __pycache__/
 figures/
 raw_data/
 sar_raw_data/
+
+# Large binary caches and models
+feature_cache_*.npz
+*.keras
+*.h5
+personalized_models/
+
+# Raw audio data
+data/
+Old_data/
+old_data-for-time-domain/
+idle/
+internal_testing_data-set1-set2/
+Environment_Evaluation_Data/
+*.pcm
+*.wav
+
+# Generated outputs
+*.pdf
+*.html
+
+# Claude tool files
+.claude/

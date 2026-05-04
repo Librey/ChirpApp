@@ -261,3 +261,139 @@ def train_lopo(X, y, groups, model_name="resnet", feature_name="stft",
         print(f"  {k:20s}: {mean:.4f} ± {std:.4f}")
 
     return summary, fold_metrics
+
+
+# ─────────────────────────────────────────
+# PERSONALIZED LOPO
+# ─────────────────────────────────────────
+
+def train_lopo_personalized(X, y, groups, model_name="resnet", feature_name="stft",
+                             epochs=50, batch_size=32, use_augment=True, is_binary=True,
+                             finetune_ratio=0.2, finetune_epochs=10, finetune_lr=1e-4):
+    """
+    Personalized LOPO cross-validation.
+
+    For each participant p:
+      1. Train a global model on all other participants (standard LOPO).
+      2. Split p's data: finetune_ratio → fine-tune set, rest → test set.
+      3. Fine-tune the global model on p's fine-tune set (low LR, few epochs).
+      4. Evaluate on p's test set.
+
+    This mimics deployment: the app collects a short calibration session per
+    user and then adapts, dramatically improving accuracy for person-specific
+    eating patterns.
+
+    finetune_ratio : fraction of each participant's segments used for fine-tuning
+                     (default 0.2 → 20% adapt, 80% test)
+    finetune_epochs: epochs for fine-tune step (small to avoid overfitting)
+    finetune_lr    : lower LR for fine-tuning to preserve global weights
+    """
+    logo         = LeaveOneGroupOut()
+    fold_metrics = defaultdict(list)
+    num_classes  = 1 if is_binary else len(np.unique(y))
+    unique_parts = np.unique(groups)
+
+    print(f"\n{'='*60}")
+    print(f"  Personalized LOPO ({len(unique_parts)} participants) | {model_name} + {feature_name}")
+    print(f"  Finetune ratio: {finetune_ratio:.0%} | Finetune epochs: {finetune_epochs}")
+    print(f"{'='*60}")
+
+    if not is_binary:
+        unique   = sorted(np.unique(y))
+        lmap     = {c: i for i, c in enumerate(unique)}
+        inv_lmap = {i: c for c, i in lmap.items()}
+    else:
+        lmap = inv_lmap = None
+
+    for fold, (train_idx, test_idx) in enumerate(logo.split(X, y, groups)):
+        test_participant = np.unique(groups[test_idx])[0]
+        X_tr, X_te_all = X[train_idx], X[test_idx]
+        y_tr, y_te_all = y[train_idx], y[test_idx]
+
+        if len(np.unique(y_te_all)) < 2 and is_binary:
+            print(f"  [{test_participant}]: skipped (single class)")
+            continue
+
+        # Split test participant's data into fine-tune and eval sets
+        n_finetune = max(1, int(len(y_te_all) * finetune_ratio))
+        rng        = np.random.default_rng(SEED + fold)
+        ft_idx     = rng.choice(len(y_te_all), size=n_finetune, replace=False)
+        eval_mask  = np.ones(len(y_te_all), dtype=bool)
+        eval_mask[ft_idx] = False
+
+        X_ft, y_ft   = X_te_all[ft_idx],   y_te_all[ft_idx]
+        X_eval, y_eval = X_te_all[eval_mask], y_te_all[eval_mask]
+
+        if len(y_eval) == 0:
+            print(f"  [{test_participant}]: skipped (no eval samples after split)")
+            continue
+
+        # Normalize using training set statistics
+        X_tr_n, X_ft_n   = normalize(X_tr, X_ft)
+        _,      X_eval_n = normalize(X_tr, X_eval)
+
+        if use_augment:
+            X_tr_n = augment_batch(X_tr_n, apply_prob=0.5)
+
+        # ── Step 1: Train global model ──
+        class_weights = get_class_weights(y_tr)
+        model = get_model(model_name, X_tr_n[0].shape, num_classes=num_classes)
+
+        if not is_binary:
+            y_tr_m  = np.array([lmap[c] for c in y_tr])
+            y_ft_m  = np.array([lmap[c] for c in y_ft])
+            y_eval_m = np.array([lmap[c] for c in y_eval])
+        else:
+            y_tr_m, y_ft_m, y_eval_m = y_tr, y_ft, y_eval
+
+        model.fit(
+            X_tr_n, y_tr_m,
+            epochs=epochs,
+            batch_size=batch_size,
+            validation_split=0.1,
+            callbacks=get_callbacks(),
+            class_weight=class_weights,
+            verbose=0
+        )
+
+        # ── Step 2: Fine-tune on participant's own data ──
+        model.optimizer.learning_rate = finetune_lr
+        ft_class_weights = get_class_weights(y_ft) if len(np.unique(y_ft)) > 1 else None
+
+        model.fit(
+            X_ft_n, y_ft_m,
+            epochs=finetune_epochs,
+            batch_size=min(batch_size, len(y_ft_m)),
+            callbacks=[EarlyStopping(patience=3, restore_best_weights=True,
+                                     monitor='loss', verbose=0)],
+            class_weight=ft_class_weights,
+            verbose=0
+        )
+
+        # ── Step 3: Evaluate ──
+        y_prob = model.predict(X_eval_n, verbose=0)
+        if is_binary:
+            y_prob_flat = y_prob.ravel()
+            y_pred      = (y_prob_flat > 0.5).astype(int)
+        else:
+            y_prob_flat = None
+            y_pred_idx  = np.argmax(y_prob, axis=1)
+            y_pred      = np.array([inv_lmap[i] for i in y_pred_idx])
+
+        m = compute_metrics(y_eval, y_pred, y_prob_flat if is_binary else None, is_binary)
+        for k, v in m.items():
+            fold_metrics[k].append(v)
+
+        print(f"  [{test_participant}]: Acc={m['accuracy']:.4f} | "
+              f"BalAcc={m['balanced_accuracy']:.4f} | F1={m['f1']:.4f}"
+              + (f" | ROC-AUC={m.get('roc_auc', 0):.4f}" if is_binary else "")
+              + f"  (ft={n_finetune}, eval={eval_mask.sum()})")
+
+        tf.keras.backend.clear_session()
+
+    summary = {k: (np.mean(v), np.std(v)) for k, v in fold_metrics.items()}
+    print(f"\n  ── Personalized LOPO Summary ──")
+    for k, (mean, std) in summary.items():
+        print(f"  {k:20s}: {mean:.4f} ± {std:.4f}")
+
+    return summary, fold_metrics

@@ -27,7 +27,7 @@ from pathlib import Path
 # ─────────────────────────────────────────────────────────────
 
 SAMPLE_RATE  = 44100          # samples recorded per second by the app
-DATA_FOLDER  = Path(__file__).resolve().parent / "raw_data/027"
+DATA_FOLDER  = Path(__file__).resolve().parent / "old_data"
 OUTPUT_DIR   = Path(__file__).resolve().parent / "figures" / "time_freq"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 

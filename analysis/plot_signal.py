@@ -5,7 +5,7 @@ from pathlib import Path
 # Paths
 SCRIPT_DIR = Path(__file__).resolve().parent
 # Using the path suggested by the user
-PCM_FILE = SCRIPT_DIR / "raw_data/001/1_001_02_01.pcm"
+PCM_FILE = SCRIPT_DIR / "old_data/1_007_06_01.pcm"
 
 SAMPLE_RATE = 44100
 DURATION_S = 1.5

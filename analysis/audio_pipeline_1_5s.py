@@ -58,12 +58,12 @@ tf.random.set_seed(SEED)
 
 # Paths
 SCRIPT_DIR = Path(__file__).resolve().parent
-RAW_DATA   = SCRIPT_DIR / "raw_data"
+RAW_DATA   = SCRIPT_DIR / "data"
 
 # Participant folders that contain EATING recordings (All 20)
-EATING_FOLDERS = [f"{i:03d}" for i in range(1, 21)]
+EATING_FOLDERS = [f"{i:03d}" for i in range(22, 41)]
 # Folders containing IDLE recordings (Pixel data only)
-IDLE_FOLDERS   = ["idle-gp"]
+IDLE_FOLDERS   = ["idle"]
 
 # IRB filename pattern: W_XXX_YY_ZZ
 IRB_RE = re.compile(r"^(\d+)_(\d{3})_(\d{2})_(\d{2})$")
