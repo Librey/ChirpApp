@@ -236,9 +236,7 @@ These results support the feasibility of passive, camera-free dietary and stress
 
 ## Notes
 
-- Raw audio data (`.pcm`) and model files (`personalized_models/`) are not included in this repository due to size.
-- Feature caches (`feature_cache_*.npz`) and pre-trained personalized models must be obtained from the research team.
-- T3 stress evaluation requires `stress_labels.npz` — contact the professor for this file.
+- Raw audio data (`.pcm`), feature caches (`feature_cache_*.npz`), and model files (`personalized_models/`) are not included in this repository due to size.
 - All SensEat pipelines tested on Windows 11, Python 3.13, TensorFlow 2.x (CPU only).
 
 ---
@@ -253,4 +251,4 @@ This project is part of Georgia State University research.
 
 **LaxmiPrasanna Ravikanti**  
 MS Computer Science, Georgia State University  
-prasanna.ms.1004@gmail.com
+lravikanti1@student.gsu.edu
