@@ -19,7 +19,7 @@ This repository contains two phases of work:
 
 ## Phase 1 — ChirpApp (Prototype)
 
-**Team:** LaxmiPrasanna Ravikanti, David Salas Carrascal, Liberty Ikpeogu
+**Team:** LaxmiPrasanna Ravikanti, David Salas Carrascal, Liberty Ikpeogu, Syed Shuja Syed
 
 ChirpApp was the initial proof-of-concept that established the core idea: a smartphone can emit inaudible ultrasonic chirps (18–20 kHz) and analyze the reflections to detect acoustic events.
 
@@ -228,7 +228,7 @@ Food recognition accuracy varies significantly between users due to individual e
 - **T1 binary detection** achieves strong performance across participants without personalization, confirming that eating events produce consistent ultrasonic signatures.
 - **Cross-user food recognition (T2)** is inherently limited because individual eating patterns vary significantly between users.
 - **Personalization is the key factor:** Per-user fine-tuned models show substantial improvement over cross-user baselines, demonstrating that user-specific adaptation is essential for practical food recognition.
-- **T3 stress prediction** generates per-user stress level estimates; ground truth evaluation is pending.
+- **T3 stress prediction** generates per-user stress level estimates.
 
 These results support the feasibility of passive, camera-free dietary and stress monitoring on commodity smartphones.
 
