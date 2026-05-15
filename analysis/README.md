@@ -154,9 +154,7 @@ These results support the feasibility of passive, acoustics-based dietary monito
 
 ## Notes
 
-- Feature caches (`feature_cache_*.npz`) and model files (`personalized_models/`) are not included in the repository due to size. Contact the project team to obtain them.
-- Raw audio data (`.pcm` files) is also excluded from the repository.
-- T3 stress evaluation requires `stress_labels.npz` — contact the professor for this file.
+- Feature caches (`feature_cache_*.npz`), model files (`personalized_models/`), and raw audio data (`.pcm` files) are not included in the repository due to size.
 - All pipelines are tested on Windows 11 with Python 3.13 and TensorFlow 2.x (CPU only).
 
 ---
@@ -165,4 +163,4 @@ These results support the feasibility of passive, acoustics-based dietary monito
 
 **LaxmiPrasanna Ravikanti**  
 MS Computer Science, Georgia State University  
-prasanna.ms.1004@gmail.com
+lravikanti1@student.gsu.edu
