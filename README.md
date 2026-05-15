@@ -1,244 +1,256 @@
-# ChirpApp
+# ChirpApp → SensEat
 
-A machine learning-powered audio analysis system designed to detect chirp signals in acoustic environments. ChirpApp combines mobile data collection with advanced signal processing and ML models to classify audio as containing chirp signals or not.
+A research project that evolved from a prototype chirp signal detector into a full smartphone-based dietary and mental stress monitoring system.
 
----
-
-## 🎯 Project Overview
-
-ChirpApp addresses the problem of detecting ultrasonic chirp signals in noisy environments. The project uses a data-driven approach to:
-
-1. **Collect audio samples** via a mobile app
-2. **Process signals** with bandpass filtering and feature extraction
-3. **Train multiple ML models** to classify chirp presence
-4. **Evaluate performance** across different chirp period durations (1s, 2s, 4s)
-5. **Select optimal parameters** based on model prediction accuracy
-
-The system is designed to be robust, generalizable, and suitable for deployment in real-world acoustic monitoring applications.
+**Developer:** LaxmiPrasanna Ravikanti  
+**Affiliation:** Georgia State University, MS Computer Science  
+**Submission:** ACM UbiComp 2026
 
 ---
 
-## 📁 Project Structure
+## Project Journey
 
-### **mobileApp/** — Android Data Collection
-Contains the Android mobile application for recording and collecting audio samples.
+This repository contains two phases of work:
 
-**Key Components:**
-- `src/main/` — Source code for the Android app
-  - `MainActivity.kt` — Main application activity and UI
-  - `ui/theme/` — Custom Material Design theme configuration
-- `AndroidManifest.xml` — App permissions and configurations
-- `build.gradle.kts` — Gradle build configuration
-- `res/` — Resource files (layouts, strings, drawables, icons)
-
-**Purpose:** Records audio clips in natural environments and labels them as positive (contains chirp) or negative (no chirp) for training data collection.
+1. **ChirpApp** — A collaborative prototype built to explore ultrasonic chirp signal detection using a smartphone and machine learning.
+2. **SensEat** — The full research system developed by LaxmiPrasanna Ravikanti, extending ChirpApp into a complete dietary and stress monitoring pipeline.
 
 ---
 
-### **analysis/** — Signal Processing & Machine Learning
-Core data analysis and model training pipeline.
+## Phase 1 — ChirpApp (Prototype)
 
-**Key Files:**
+**Team:** LaxmiPrasanna Ravikanti, David Salas Carrascal, Liberty Ikpeogu
 
-#### `audio-filter.py` (Main Pipeline)
-The comprehensive analysis script that:
+ChirpApp was the initial proof-of-concept that established the core idea: a smartphone can emit inaudible ultrasonic chirps (18–20 kHz) and analyze the reflections to detect acoustic events.
 
-1. **Loads & Cleans Audio**
-   - Bandpass filters signals (17.5 kHz - 20.5 kHz)
-   - Converts `.wav` and `.pcm` files
-   - Normalizes amplitude
+### What ChirpApp Does
+- Emits ultrasonic chirp signals via the smartphone speaker
+- Records reflections through the microphone
+- Detects whether a chirp signal is present in a given audio segment (binary classification)
+- Evaluates performance across different chirp period durations (T = 1s, 2s, 4s)
 
-2. **Segments Signals**
-   - Divides long audio into fixed-duration chunks based on chirp period T
-   - Tests three periods: T ∈ {1s, 2s, 4s}
-   - Each segment becomes one training/test sample
+### Android App (mobileApp/)
+The Android prototype app for data collection.
 
-3. **Extracts Features** (4 modalities)
-   - **Statistical Features**: Mean, std, max, min, power, zero-crossing rate
-   - **Wavelet Features**: Discrete wavelet coefficients (db4, level 4)
-   - **MFCC (Mel-Frequency Cepstral Coefficients)**: 40 coefficients, 64 frames
-   - **Spectrograms**: Mel-spectrogram and STFT (64×64 normalized images)
+- `src/main/MainActivity.kt` — Main activity and recording logic
+- `AndroidManifest.xml` — App permissions (microphone, storage)
+- `build.gradle.kts` — Build configuration
+- `res/` — UI layouts, icons, and resources
 
-4. **Trains Models**
-   - **Classical ML** (on statistical/wavelet features):
-     - Support Vector Machine (SVM)
-     - Random Forest (100 estimators)
-     - k-Nearest Neighbors (k=5)
-   - **Deep Learning** (on spectral features):
-     - Simple 2D CNN with Conv2D → MaxPool → Dense layers
-     - Trained separately on mel-spec, MFCC, wavelet scalogram, STFT
+### Analysis Pipeline (audio-filter.py)
+The prototype ML pipeline that:
+- Bandpass filters signals (17.5–20.5 kHz)
+- Segments audio into fixed-duration chunks based on chirp period T
+- Extracts 4 feature modalities: Statistical, Wavelet, MFCC, Spectrogram (STFT)
+- Trains and evaluates classical ML models (SVM, Random Forest, kNN) and a lightweight CNN
+- Outputs results to `model_results.csv`
 
-5. **Evaluates Performance**
-   - **Cross-validation**: 5-fold stratified K-fold (or fewer with small datasets)
-   - **Train/Test Split**: 80% train, 20% test (when sample size permits)
-   - **Metrics Recorded**:
-     - Accuracy, Precision, Recall, F1-score
-     - Mean ± std for all metrics
-
-6. **Saves Results**
-   - Outputs `model_results.csv` with comprehensive results:
-     - T value, model type, feature modality, evaluation type
-     - Full performance metrics for every model×modality×T combination
-
-#### Data Directories
-- `raw_data/` — Positive samples (contain chirp signals)
-- `negative_data/` — Negative samples (no chirp signals)
-- `analyzed_data/` — Output folder for processed results
-
-#### Requirements
-```
-numpy, pandas, librosa, PyWavelets, opencv-python, scipy, scikit-learn, tensorflow
-```
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Python 3.10+
-- Virtual environment (recommended)
-
-### Installation
-
+### Quick Start (ChirpApp)
 ```bash
-# Clone the repository
-git clone https://github.com/DaveTron4/ChirpApp.git
+git clone https://github.com/Librey/ChirpApp.git
 cd ChirpApp/analysis
-
-# Create and activate virtual environment
-python -m venv .venv
-.\.venv\Scripts\activate  # Windows
-source .venv/bin/activate  # macOS/Linux
-
-# Install dependencies
 pip install numpy pandas librosa PyWavelets opencv-python scipy scikit-learn tensorflow
-```
-
-### Running the Analysis
-
-```bash
 python audio-filter.py
 ```
 
-**Output:**
-- Console logs showing progress for each T value
-- `model_results.csv` — Full results table with all metrics
+### ChirpApp Model Details
 
----
-
-## 📊 Results & Interpretation
-
-The pipeline tests three chirp periods and evaluates each model across all feature modalities.
-
-### Key Metrics per Model:
-- **Accuracy**: Overall correctness
-- **Precision**: True positive rate among predicted positives
-- **Recall**: Detection rate of actual positives
-- **F1-Score**: Harmonic mean of precision & recall
-
-### Expected Performance:
-- **T=1s**: Best results (23 samples) — Models typically achieve 95-100% accuracy
-- **T=2s**: Good results (11 samples) — Models typically achieve 90-100% accuracy
-- **T=4s**: Limited by data (5 samples) — Less reliable; ~58% accuracy
-
-### Choosing the Optimal T:
-Based on results in `model_results.csv`, **T=1s** is recommended for production because:
-- Most training samples
-- Highest and most stable accuracy
-- Best generalization to test data
-- Consistent performance across all model types
-
----
-
-## 🔧 Configuration
-
-Edit `audio-filter.py` constants to customize the pipeline:
-
-```python
-SAMPLE_RATE = 44100        # Audio sample rate (Hz)
-LOWCUT = 17500.0           # Bandpass filter lower cutoff (Hz)
-HIGHCUT = 20500.0          # Bandpass filter upper cutoff (Hz)
-FILTER_ORDER = 6           # Butterworth filter order
-T_VALUES = [1, 2, 4]       # Chirp periods to test (seconds)
-LOAD_POSITIVE = True       # Include positive samples
-LOAD_NEGATIVE = True       # Include negative samples
+**Classical ML:**
+```
+Raw Features → StandardScaler → SVM / RF / kNN → Predictions
 ```
 
----
-
-## 📈 Model Details
-
-### Classical ML Pipeline
+**CNN Architecture:**
 ```
-Raw Features → StandardScaler → SVM/RF/kNN → Predictions
-```
-Uses 5-fold stratified cross-validation for robust evaluation.
-
-### CNN Architecture
-```
-Input (64×64×1 image) 
-  → Conv2D(16, 3×3) + ReLU
-  → MaxPooling2D(2×2)
-  → Conv2D(32, 3×3) + ReLU
-  → MaxPooling2D(2×2)
-  → Flatten
-  → Dense(64) + ReLU + Dropout(0.4)
+Input (64×64×1)
+  → Conv2D(16, 3×3) + ReLU → MaxPooling
+  → Conv2D(32, 3×3) + ReLU → MaxPooling
+  → Flatten → Dense(64) + Dropout(0.4)
   → Dense(1) + Sigmoid
 ```
 
-Simple, lightweight design to avoid overfitting on small datasets.
+### Configuration
+```python
+SAMPLE_RATE = 44100        # Audio sample rate (Hz)
+LOWCUT      = 17500.0      # Bandpass filter lower cutoff (Hz)
+HIGHCUT     = 20500.0      # Bandpass filter upper cutoff (Hz)
+FILTER_ORDER = 6           # Butterworth filter order
+T_VALUES    = [1, 2, 4]   # Chirp periods to test (seconds)
+```
 
----
-
-## 📝 Output Format
-
-`model_results.csv` contains:
+### Output Format (model_results.csv)
 
 | Column | Description |
 |--------|-------------|
 | `T` | Chirp period (1, 2, or 4 seconds) |
 | `model` | Model type (SVM, RF, kNN, CNN) |
-| `modality` | Feature type (stat, wavelet, mel_spec, mfcc, wavelet_scalo, stft) |
-| `eval_type` | Evaluation method (cross_validation or 80_20_split) |
-| `accuracy_mean` | Mean accuracy score |
-| `accuracy_std` | Standard deviation of accuracy |
+| `modality` | Feature type (stat, wavelet, mel_spec, mfcc, stft) |
+| `eval_type` | cross_validation or 80_20_split |
+| `accuracy_mean` | Mean accuracy |
 | `precision_mean` | Mean precision |
 | `recall_mean` | Mean recall |
 | `f1_mean` | Mean F1-score |
 
 ---
 
-## ⚙️ Troubleshooting
+## Phase 2 — SensEat (Main System)
 
-### "No samples found" error
-- Check that `raw_data/` and `negative_data/` folders contain `.wav` or `.pcm` files
-- Ensure files are not corrupted
+**Developer:** LaxmiPrasanna Ravikanti
 
-### NaN values in results
-- Occurs when dataset is too small (T=4s with <5 samples)
-- kNN in particular struggles with minimal data
-- Recommendation: Collect more audio samples
+Building on the ChirpApp prototype, LaxmiPrasanna Ravikanti designed and developed SensEat — a complete system for passive dietary monitoring and mental stress prediction using only a smartphone.
 
-### TensorFlow warnings
-- "oneDNN custom operations" and "function retracing" warnings are informational
-- They don't affect results; suppress with `TF_ENABLE_ONEDNN_OPTS=0`
+### What SensEat Does
 
----
+| Task | Description | Approach |
+|------|-------------|----------|
+| **T1** | Eating detection (eating vs. not eating) | Binary classification |
+| **T2** | Food recognition (10 food types) | Multiclass classification + Personalization |
+| **T3** | Mental stress prediction (scale 1–5) | Regression |
 
-## 🎓 Future Improvements
-
-- Add data augmentation techniques (time-stretch, pitch-shift)
-- Implement ensemble methods combining multiple modalities
-- Deploy optimal model to mobile app
-- Support real-time inference on device
-- Add confusion matrices and ROC curves to analysis
+**Food categories:** Tortilla, Fruit, Chicken, Cracker, Carrot, Chocolate, Yogurt, Noodles, Water, Soft Drink
 
 ---
 
-## 📄 License
+### Android App (mobileApp/)
+
+The SensEat Android app developed by LaxmiPrasanna Ravikanti handles continuous ultrasonic sensing during IRB study sessions.
+
+- Records stereo `.pcm` audio with participant and food session metadata
+- Supports all 10 food categories used in the IRB study
+- Optimized for continuous background sensing
+- **Battery performance:** ~400 mAh/hour on Samsung Galaxy S25 (5% drain over 30 minutes)
+
+---
+
+### Analysis Pipeline (analysis/)
+
+Full ML pipeline developed by LaxmiPrasanna Ravikanti.
+
+#### Project Structure
+
+```
+analysis/
+├── audio_pipeline_multibranch.py              # Main pipeline: Multi-Branch Attention Fusion (T1 + T2 + personalized T2)
+├── audio_pipeline_lopo_multiclass_balanced.py # LOPO multiclass with per-fold undersampling
+├── audio_pipeline_lopo_multiclass.py          # LOPO multiclass baseline
+├── audio_pipeline_lopo_balanced.py            # LOPO binary with balancing
+├── audio_pipeline_lopo.py                     # LOPO binary baseline
+├── audio_pipeline_8020.py                     # 80/20 train-test split pipeline
+├── audio_pipeline_grid_search.py              # Hyperparameter grid search
+├── audio_pipeline_per_participant.py          # Per-participant training and evaluation
+├── audio_pipeline_robustness.py               # Robustness evaluation across conditions
+├── audio_pipeline_sar_classifier.py           # SAR-style echo profile classifier
+├── audio_pipeline_1_5s.py                    # 1.5s segment pipeline variant
+├── evaluate_personalized.py                   # Evaluates pre-trained personalized models (users 001-020)
+├── generate_personalized_eval_report.py       # PDF report for personalized model evaluation
+├── generate_t2_report.py                      # PDF report for T2 personalization (users 022-041)
+├── generate_report.py                         # General PDF report generator
+├── feature_extraction.py                      # STFT / MFCC / GFCC feature extraction utilities
+├── signal_analysis.py                         # Raw signal visualization and analysis
+├── plot_signal.py                             # Time-domain signal plotting
+├── plot_time_freq.py                          # Time-frequency spectrogram plotting
+├── segmentation_chirp_level.py               # Chirp-level segmentation
+├── segmentation_servings_level.py            # Serving-level segmentation
+├── senseat/
+│   └── training/
+│       └── trainer.py                         # Trainer wrapper: LOPO, personalization, augmentation
+├── personalized_t2_results.csv               # T2 per-user evaluation results (users 001-020)
+├── personalized_t3_predictions.csv           # T3 raw stress predictions (users 001-020)
+├── pipeline_multibranch_results.csv          # T1/T2/T2-personalized results
+├── pipeline_lopo_*_results.csv               # LOPO experiment results
+└── pipeline_*_foldwise.csv                   # Per-fold breakdowns
+```
+
+#### Setup
+
+**Requirements:** Python 3.9+
+
+```bash
+pip install numpy scipy matplotlib seaborn pandas scikit-learn tensorflow keras reportlab
+```
+
+#### Running the Pipelines
+
+**T1 + T2 + Personalized T2 (Multi-Branch):**
+```bash
+python audio_pipeline_multibranch.py
+```
+
+**LOPO Multiclass (Balanced):**
+```bash
+python audio_pipeline_lopo_multiclass_balanced.py
+```
+
+**Evaluate Pre-Trained Personalized Models (Users 001–020):**
+```bash
+python evaluate_personalized.py
+```
+Requires:
+- `feature_cache_multiclass_balanced_v2.npz`
+- `personalized_models/T2_user_XXX_multiclass.keras`
+- `personalized_models/T2_user_XXX_normalization.npz`
+
+**Generate PDF Reports:**
+```bash
+python generate_personalized_eval_report.py
+python generate_t2_report.py
+```
+
+---
+
+### Model Architecture
+
+The **Multi-Branch Attention Fusion** model combines four parallel branches:
+
+| Branch | Input | Type |
+|--------|-------|------|
+| 1 | STFT spectrogram (64×64) | 2D CNN |
+| 2 | MFCC features | 2D CNN |
+| 3 | GFCC (Gammatone) features | 2D CNN |
+| 4 | Statistical features | 1D CNN |
+
+All branches are fused via an **attention-weighted layer** before the final classification/regression head.
+
+---
+
+### Personalization Approach
+
+Food recognition accuracy varies significantly between users due to individual eating patterns and acoustic environments. SensEat addresses this with:
+
+- **LOPO Fine-tuning:** Global model trained on N−1 participants, then fine-tuned on 20% of the held-out participant's data and evaluated on the remaining 80%.
+- **Per-user normalization:** STFT features z-score normalized per user using saved `normalization.npz` files.
+- **Per-fold undersampling:** Food classes balanced to minority class count within each fold to prevent class imbalance bias.
+
+---
+
+### Key Findings
+
+- **T1 binary detection** achieves strong performance across participants without personalization, confirming that eating events produce consistent ultrasonic signatures.
+- **Cross-user food recognition (T2)** is inherently limited because individual eating patterns vary significantly between users.
+- **Personalization is the key factor:** Per-user fine-tuned models show substantial improvement over cross-user baselines, demonstrating that user-specific adaptation is essential for practical food recognition.
+- **T3 stress prediction** generates per-user stress level estimates; ground truth evaluation is pending.
+
+These results support the feasibility of passive, camera-free dietary and stress monitoring on commodity smartphones.
+
+---
+
+## Notes
+
+- Raw audio data (`.pcm`) and model files (`personalized_models/`) are not included in this repository due to size.
+- Feature caches (`feature_cache_*.npz`) and pre-trained personalized models must be obtained from the research team.
+- T3 stress evaluation requires `stress_labels.npz` — contact the professor for this file.
+- All SensEat pipelines tested on Windows 11, Python 3.13, TensorFlow 2.x (CPU only).
+
+---
+
+## License
 
 This project is part of Georgia State University research.
 
 ---
 
+## Contact
 
+**LaxmiPrasanna Ravikanti**  
+MS Computer Science, Georgia State University  
+prasanna.ms.1004@gmail.com
