@@ -1,6 +1,6 @@
 # SensEat — Analysis Pipeline
 
-**Developer:** LaxmiPrasanna Raavi  
+**Developer:** LaxmiPrasanna Ravikanti  
 **Project:** SensEat — Smartphone-Based Dietary and Mental Stress Monitoring  
 **Affiliation:** Georgia State University, MS Computer Science  
 **Submission:** ACM UbiComp 2026
@@ -133,16 +133,14 @@ python generate_t2_report.py                  # T2 personalization report (users
 
 ---
 
-## Key Results
+## Key Findings
 
-| Experiment | Accuracy | Macro F1 |
-|------------|----------|----------|
-| T1 Binary (cross-user) | ~95% | — |
-| T2 Cross-user baseline | 12.85% | — |
-| T2 Personalized LOPO (users 022–041) | 31.77% | — |
-| T2 Personalized models (users 001–020) | **73.82%** | **0.4884** |
+- **T1 binary detection** (eating vs. not eating) achieves strong performance across participants without personalization, confirming that the eating event itself produces consistent acoustic signatures.
+- **Cross-user food recognition (T2)** is inherently limited because individual eating patterns and acoustic environments vary significantly between users.
+- **Personalization is essential:** Per-user fine-tuned models show substantial improvement over cross-user baselines, demonstrating that user-specific adaptation is critical for reliable food recognition.
+- **T3 stress prediction** generates per-user stress level estimates; ground truth evaluation is pending.
 
-Personalization provides a **5.75× improvement** over the cross-user baseline.
+These results support the feasibility of passive, acoustics-based dietary monitoring on commodity smartphones, with personalization as the key factor for practical accuracy.
 
 ---
 
@@ -167,3 +165,4 @@ Personalization provides a **5.75× improvement** over the cross-user baseline.
 
 **LaxmiPrasanna Ravikanti**  
 MS Computer Science, Georgia State University  
+prasanna.ms.1004@gmail.com
