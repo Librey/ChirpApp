@@ -138,7 +138,7 @@ python generate_t2_report.py                  # T2 personalization report (users
 - **T1 binary detection** (eating vs. not eating) achieves strong performance across participants without personalization, confirming that the eating event itself produces consistent acoustic signatures.
 - **Cross-user food recognition (T2)** is inherently limited because individual eating patterns and acoustic environments vary significantly between users.
 - **Personalization is essential:** Per-user fine-tuned models show substantial improvement over cross-user baselines, demonstrating that user-specific adaptation is critical for reliable food recognition.
-- **T3 stress prediction** generates per-user stress level estimates; ground truth evaluation is pending.
+- **T3 stress prediction** generates per-user stress level estimates.
 
 These results support the feasibility of passive, acoustics-based dietary monitoring on commodity smartphones, with personalization as the key factor for practical accuracy.
 
